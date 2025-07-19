@@ -1,7 +1,7 @@
 package storage
 
 import (
-	"github.com/SamSafonov2025/metrics-tpl.git/cmd/server/metrics"
+	"github.com/SamSafonov2025/metrics-tpl/cmd/server/metrics"
 )
 
 type MemStorage struct {
