@@ -1,8 +1,11 @@
 package main
 
 import (
+	"flag"
+	"fmt"
 	"log"
 	"net/http"
+	"os"
 
 	"github.com/SamSafonov2025/metrics-tpl.git/cmd/server/handlers"
 	"github.com/SamSafonov2025/metrics-tpl.git/cmd/server/storage"
@@ -10,6 +13,16 @@ import (
 )
 
 func main() {
+	// Define and parse command-line flags
+	addr := flag.String("a", "localhost:8080", "HTTP server endpoint address")
+	flag.Parse()
+
+	// Check for unknown flags
+	if flag.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "Error: unknown flag(s): %v\n", flag.Args())
+		os.Exit(1)
+	}
+
 	storage := storage.NewStorage()
 	router := chi.NewRouter()
 
@@ -25,8 +38,8 @@ func main() {
 	handlers.UpdateHandler(storage, router)
 	handlers.GetHandler(storage, router)
 
-	log.Println("Server is running on http://localhost:8080")
-	err := http.ListenAndServe("localhost:8080", router)
+	log.Printf("Server is running on http://%s", *addr)
+	err := http.ListenAndServe(*addr, router)
 	if err != nil {
 		log.Fatal("Server failed to start: ", err)
 	}

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"math/rand"
 	"net/http"
+	"os"
 	"runtime"
 	"strconv"
 	"time"
@@ -12,13 +14,15 @@ import (
 type Agent struct {
 	pollInterval   time.Duration
 	reportInterval time.Duration
+	serverAddress  string
 	pollCount      int64
 }
 
-func NewAgent(poolInterval, reportInterval time.Duration) *Agent {
+func NewAgent(pollInterval, reportInterval time.Duration, serverAddress string) *Agent {
 	return &Agent{
-		pollInterval:   poolInterval,
+		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
+		serverAddress:  serverAddress,
 		pollCount:      0,
 	}
 }
@@ -27,7 +31,8 @@ func (a *Agent) collectMetrics() map[string]float64 {
 	memStats := new(runtime.MemStats)
 	runtime.ReadMemStats(memStats)
 
-	metrics := map[string]float64{"Alloc": float64(memStats.Alloc),
+	metrics := map[string]float64{
+		"Alloc":         float64(memStats.Alloc),
 		"BuckHashSys":   float64(memStats.BuckHashSys),
 		"Frees":         float64(memStats.Frees),
 		"GCCPUFraction": memStats.GCCPUFraction,
@@ -62,10 +67,10 @@ func (a *Agent) collectMetrics() map[string]float64 {
 
 func (a *Agent) sendMetrics(metricType, metricName string, value float64) {
 	metricValue := strconv.FormatFloat(value, 'f', -1, 64)
-	url := fmt.Sprintf("http://localhost:8080/update/%s/%s/%s", metricType, metricName, metricValue)
+	url := fmt.Sprintf("http://%s/update/%s/%s/%s", a.serverAddress, metricType, metricName, metricValue)
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
-		fmt.Println("Error of creating request:", err)
+		fmt.Println("Error creating request:", err)
 		return
 	}
 	req.Header.Set("Content-type", "text-plain")
@@ -73,12 +78,12 @@ func (a *Agent) sendMetrics(metricType, metricName string, value float64) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		fmt.Println("Error to sending request:", err)
+		fmt.Println("Error sending request:", err)
 		return
 	}
 
 	defer resp.Body.Close()
-	fmt.Printf("Metrics %s (%s) with value %s sent succesfully", metricName, metricType, metricValue)
+	fmt.Printf("Metrics %s (%s) with value %s sent successfully\n", metricName, metricType, metricValue)
 }
 
 func (a *Agent) start() {
@@ -90,23 +95,39 @@ func (a *Agent) start() {
 			a.pollCount++
 			metrics := a.collectMetrics()
 			metrics["PollCount"] = float64(a.pollCount)
-			fmt.Println("Metrics collected:", metrics)
 		case <-reportTicker.C:
 			metrics := a.collectMetrics()
 			metrics["PollCount"] = float64(a.pollCount)
-			fmt.Println("Metrics collected:", metrics)
 
 			for name, value := range metrics {
 				a.sendMetrics("gauge", name, value)
 			}
 			a.sendMetrics("counter", "PollCount", float64(a.pollCount))
-
 		}
 	}
 }
 
 func main() {
-	agent := NewAgent(2*time.Second, 10*time.Second)
-	agent.start()
+	// Define flags
+	serverAddress := flag.String("a", "localhost:8080", "HTTP server endpoint address")
+	pollInterval := flag.Int("p", 2, "Poll interval in seconds")
+	reportInterval := flag.Int("r", 10, "Report interval in seconds")
 
+	// Parse flags
+	flag.Parse()
+
+	// Check for unknown flags
+	if flag.NArg() > 0 {
+		fmt.Fprintf(os.Stderr, "Error: unknown flag(s): %v\n", flag.Args())
+		os.Exit(1)
+	}
+
+	// Create agent with configured values
+	agent := NewAgent(
+		time.Duration(*pollInterval)*time.Second,
+		time.Duration(*reportInterval)*time.Second,
+		*serverAddress,
+	)
+
+	agent.start()
 }
