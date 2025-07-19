@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/SamSafonov2025/metrics-tpl.git/cmd/server/storage"
+	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage"
 	"github.com/go-chi/chi/v5"
 )
 

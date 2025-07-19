@@ -1,7 +1,6 @@
-module github.com/SamSafonov2025/metrics-tpl.git
+module github.com/SamSafonov2025/metrics-tpl
 
 go 1.22.4
-
 
 require (
 	github.com/go-chi/chi/v5 v5.1.0
