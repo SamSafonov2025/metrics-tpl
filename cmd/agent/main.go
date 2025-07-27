@@ -1,33 +1,27 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"math/rand"
 	"net/http"
-	"os"
+	"net/url"
+	"path"
 	"runtime"
 	"strconv"
 	"time"
+
+	"github.com/SamSafonov2025/metrics-tpl/internal/config"
 )
 
-type Agent struct {
-	pollInterval   time.Duration
-	reportInterval time.Duration
-	serverAddress  string
-	pollCount      int64
+type MetricsCollector struct {
+	pollCount int64
 }
 
-func NewAgent(pollInterval, reportInterval time.Duration, serverAddress string) *Agent {
-	return &Agent{
-		pollInterval:   pollInterval,
-		reportInterval: reportInterval,
-		serverAddress:  serverAddress,
-		pollCount:      0,
-	}
+func NewMetricsCollector() *MetricsCollector {
+	return &MetricsCollector{pollCount: 0}
 }
 
-func (a *Agent) collectMetrics() map[string]float64 {
+func (m *MetricsCollector) Collect() map[string]float64 {
 	memStats := new(runtime.MemStats)
 	runtime.ReadMemStats(memStats)
 
@@ -60,23 +54,40 @@ func (a *Agent) collectMetrics() map[string]float64 {
 		"Sys":           float64(memStats.Sys),
 		"TotalAlloc":    float64(memStats.TotalAlloc),
 		"RandomValue":   rand.Float64() * 100,
+		"PollCount":     float64(m.pollCount),
 	}
 
+	m.pollCount++
 	return metrics
 }
 
-func (a *Agent) sendMetrics(metricType, metricName string, value float64) {
+type MetricsSender struct {
+	serverAddress string
+	client        *http.Client
+}
+
+func NewMetricsSender(serverAddress string) *MetricsSender {
+	return &MetricsSender{
+		serverAddress: serverAddress,
+		client:        &http.Client{},
+	}
+}
+
+func (s *MetricsSender) Send(metricType, metricName string, value float64) {
 	metricValue := strconv.FormatFloat(value, 'f', -1, 64)
-	url := fmt.Sprintf("http://%s/update/%s/%s/%s", a.serverAddress, metricType, metricName, metricValue)
+	baseURL := fmt.Sprintf("http://%s", s.serverAddress)
+	u, _ := url.Parse(baseURL)
+	u.Path = path.Join("/update", metricType, metricName, metricValue)
+	url := u.String()
+
 	req, err := http.NewRequest(http.MethodPost, url, nil)
 	if err != nil {
 		fmt.Println("Error creating request:", err)
 		return
 	}
-	req.Header.Set("Content-type", "text-plain")
+	req.Header.Set("Content-Type", "text/plain")
 
-	client := &http.Client{}
-	resp, err := client.Do(req)
+	resp, err := s.client.Do(req)
 	if err != nil {
 		fmt.Println("Error sending request:", err)
 		return
@@ -86,47 +97,46 @@ func (a *Agent) sendMetrics(metricType, metricName string, value float64) {
 	fmt.Printf("Metrics %s (%s) with value %s sent successfully\n", metricName, metricType, metricValue)
 }
 
+type Agent struct {
+	pollInterval   time.Duration
+	reportInterval time.Duration
+	collector      *MetricsCollector
+	sender         *MetricsSender
+}
+
+func NewAgent(pollInterval, reportInterval time.Duration, serverAddress string) *Agent {
+	return &Agent{
+		pollInterval:   pollInterval,
+		reportInterval: reportInterval,
+		collector:      NewMetricsCollector(),
+		sender:         NewMetricsSender(serverAddress),
+	}
+}
+
 func (a *Agent) start() {
 	ticker := time.NewTicker(a.pollInterval)
 	reportTicker := time.NewTicker(a.reportInterval)
 	for {
 		select {
 		case <-ticker.C:
-			a.pollCount++
-			metrics := a.collectMetrics()
-			metrics["PollCount"] = float64(a.pollCount)
+			a.collector.Collect()
 		case <-reportTicker.C:
-			metrics := a.collectMetrics()
-			metrics["PollCount"] = float64(a.pollCount)
-
+			metrics := a.collector.Collect()
 			for name, value := range metrics {
-				a.sendMetrics("gauge", name, value)
+				a.sender.Send("gauge", name, value)
 			}
-			a.sendMetrics("counter", "PollCount", float64(a.pollCount))
+			a.sender.Send("counter", "PollCount", float64(a.collector.pollCount-1))
 		}
 	}
 }
 
 func main() {
-	// Define flags
-	serverAddress := flag.String("a", "localhost:8080", "HTTP server endpoint address")
-	pollInterval := flag.Int("p", 2, "Poll interval in seconds")
-	reportInterval := flag.Int("r", 10, "Report interval in seconds")
+	cfg := config.ParseFlags()
 
-	// Parse flags
-	flag.Parse()
-
-	// Check for unknown flags
-	if flag.NArg() > 0 {
-		fmt.Fprintf(os.Stderr, "Error: unknown flag(s): %v\n", flag.Args())
-		os.Exit(1)
-	}
-
-	// Create agent with configured values
 	agent := NewAgent(
-		time.Duration(*pollInterval)*time.Second,
-		time.Duration(*reportInterval)*time.Second,
-		*serverAddress,
+		cfg.PollInterval,
+		cfg.ReportInterval,
+		cfg.ServerAddress,
 	)
 
 	agent.start()

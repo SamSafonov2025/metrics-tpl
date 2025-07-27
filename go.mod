@@ -3,8 +3,8 @@ module github.com/SamSafonov2025/metrics-tpl
 go 1.22.4
 
 require (
-	github.com/go-chi/chi/v5 v5.1.0
-	github.com/stretchr/testify v1.9.0
+	github.com/go-chi/chi/v5 v5.2.2
+	github.com/stretchr/testify v1.10.0
 )
 
 require (
