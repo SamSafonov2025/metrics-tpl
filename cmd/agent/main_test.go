@@ -5,6 +5,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"strings"
 	"testing"
@@ -37,8 +38,9 @@ func TestAgentSendMetrics(t *testing.T) {
 	// Переопределим метод sendMetrics, чтобы он отправлял запросы на наш тестовый сервер
 	sendMetrics := func(metricType, metricName string, value float64) {
 		metricValue := strconv.FormatFloat(value, 'f', -1, 64)
-		url := fmt.Sprintf("%s/update/%s/%s/%s", server.URL, metricType, metricName, metricValue)
-		req, err := http.NewRequest(http.MethodPost, url, nil)
+		baseURL, _ := url.Parse(server.URL)
+		baseURL.Path = fmt.Sprintf("/update/%s/%s/%s", metricType, metricName, metricValue)
+		req, err := http.NewRequest(http.MethodPost, baseURL.String(), nil)
 		if err != nil {
 			t.Fatalf("Error creating request: %v", err)
 		}
