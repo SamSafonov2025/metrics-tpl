@@ -1,36 +1,40 @@
 package main
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/handlers"
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage"
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
+	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
 )
 
 func main() {
 	cfg := config.ParseFlags()
 
+	if err := logger.Init(); err != nil {
+		panic(err)
+	}
+
 	storage := storage.NewStorage()
 	router := chi.NewRouter()
 
-	// Add logging middleware
-	router.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			log.Printf("Received %s request for %s", r.Method, r.URL.Path)
-			next.ServeHTTP(w, r)
-		})
-	})
+	h := handlers.NewHandler(storage)
 
-	handlers.HomeHandle(storage, router)
-	handlers.UpdateHandler(storage, router)
-	handlers.GetHandler(storage, router)
+	router.Get("/", logger.HandlerLog(h.HomeHandler))
+	router.Post("/update/{metricType}/{metricName}/{metricValue}", logger.HandlerLog(h.UpdateHandler))
+	router.Get("/value/{metricType}/{metricName}", logger.HandlerLog(h.GetHandler))
 
-	log.Printf("Server is running on http://%s", cfg.ServerAddress)
+	logger.GetLogger().Info("Server started",
+		zap.String("address", cfg.ServerAddress),
+	)
+
 	err := http.ListenAndServe(cfg.ServerAddress, router)
 	if err != nil {
-		log.Fatal("Server failed to start: ", err)
+		logger.GetLogger().Fatal("Server failed to start",
+			zap.Error(err),
+		)
 	}
 }
