@@ -1,21 +1,20 @@
 package handlers
 
 import (
-	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage"
 	"net/http"
 	"net/http/httptest"
-
-	// "strings"
 	"testing"
 
+	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestUpdateHandlerGaugeSuccess(t *testing.T) {
 	s := storage.NewStorage()
+	h := NewHandler(s)
 	router := chi.NewRouter()
-	UpdateHandler(s, router)
+	router.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
 
 	req := httptest.NewRequest(http.MethodPost, "/update/gauge/temperature/23.5", nil)
 	req.Header.Set("Content-Type", "text/plain")
@@ -32,8 +31,9 @@ func TestUpdateHandlerGaugeSuccess(t *testing.T) {
 
 func TestUpdateHandlerCounterSuccess(t *testing.T) {
 	s := storage.NewStorage()
+	h := NewHandler(s)
 	router := chi.NewRouter()
-	UpdateHandler(s, router)
+	router.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
 
 	req := httptest.NewRequest(http.MethodPost, "/update/counter/hits/10", nil)
 	req.Header.Set("Content-Type", "text/plain")
@@ -50,8 +50,9 @@ func TestUpdateHandlerCounterSuccess(t *testing.T) {
 
 func TestUpdateHandlerInvalidMetricType(t *testing.T) {
 	s := storage.NewStorage()
+	h := NewHandler(s)
 	router := chi.NewRouter()
-	UpdateHandler(s, router)
+	router.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
 
 	req := httptest.NewRequest(http.MethodPost, "/update/unknown/temperature/23.5", nil)
 	req.Header.Set("Content-Type", "text/plain")
@@ -65,9 +66,9 @@ func TestUpdateHandlerInvalidMetricType(t *testing.T) {
 func TestGetHandlerGaugeSuccess(t *testing.T) {
 	s := storage.NewStorage()
 	s.SetGauge("temperature", 23.5)
-
+	h := NewHandler(s)
 	router := chi.NewRouter()
-	GetHandler(s, router)
+	router.Get("/value/{metricType}/{metricName}", h.GetHandler)
 
 	req := httptest.NewRequest(http.MethodGet, "/value/gauge/temperature", nil)
 
@@ -81,9 +82,9 @@ func TestGetHandlerGaugeSuccess(t *testing.T) {
 func TestGetHandlerCounterSuccess(t *testing.T) {
 	s := storage.NewStorage()
 	s.IncrementCounter("hits", 10)
-
+	h := NewHandler(s)
 	router := chi.NewRouter()
-	GetHandler(s, router)
+	router.Get("/value/{metricType}/{metricName}", h.GetHandler)
 
 	req := httptest.NewRequest(http.MethodGet, "/value/counter/hits", nil)
 
@@ -96,8 +97,9 @@ func TestGetHandlerCounterSuccess(t *testing.T) {
 
 func TestGetHandlerMetricNotFound(t *testing.T) {
 	s := storage.NewStorage()
+	h := NewHandler(s)
 	router := chi.NewRouter()
-	GetHandler(s, router)
+	router.Get("/value/{metricType}/{metricName}", h.GetHandler)
 
 	req := httptest.NewRequest(http.MethodGet, "/value/gauge/unknown", nil)
 
@@ -111,9 +113,9 @@ func TestHomeHandle(t *testing.T) {
 	s := storage.NewStorage()
 	s.SetGauge("temperature", 23.5)
 	s.IncrementCounter("hits", 10)
-
+	h := NewHandler(s)
 	router := chi.NewRouter()
-	HomeHandle(s, router)
+	router.Get("/", h.HomeHandler)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 
