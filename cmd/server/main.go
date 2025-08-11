@@ -5,6 +5,7 @@ import (
 
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/handlers"
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage"
+	"github.com/SamSafonov2025/metrics-tpl/internal/compressor"
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 	"github.com/go-chi/chi/v5"
@@ -20,6 +21,8 @@ func main() {
 
 	storage := storage.NewStorage()
 	router := chi.NewRouter()
+
+	router.Use(compressor.GzipMiddleware)
 
 	h := handlers.NewHandler(storage)
 

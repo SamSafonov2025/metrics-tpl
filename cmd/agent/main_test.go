@@ -1,6 +1,7 @@
 package main
 
 import (
+	"compress/gzip"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -10,24 +11,27 @@ import (
 )
 
 func TestMetricsSender_SendJSON(t *testing.T) {
-	// Создаем тестовый сервер
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Проверяем путь
 		assert.Equal(t, "/update", r.URL.Path, "Expected path /update")
-		// Проверяем метод
 		assert.Equal(t, http.MethodPost, r.Method, "Expected POST method")
-		// Проверяем заголовок Content-Type
 		contentType := r.Header.Get("Content-Type")
 		assert.Equal(t, "application/json", contentType, "Expected Content-Type: application/json")
 
-		// Декодируем тело
+		contentEncoding := r.Header.Get("Content-Encoding")
+		assert.Equal(t, "gzip", contentEncoding, "Expected Content-Encoding: gzip")
+
+		gzipReader, err := gzip.NewReader(r.Body)
+		if err != nil {
+			t.Fatalf("Failed to create gzip reader: %v", err)
+		}
+		defer gzipReader.Close()
+
 		var metric Metrics
-		err := json.NewDecoder(r.Body).Decode(&metric)
+		err = json.NewDecoder(gzipReader).Decode(&metric)
 		if err != nil {
 			t.Fatalf("Failed to decode JSON: %v", err)
 		}
 
-		// Проверяем метрику
 		assert.Equal(t, "testMetric", metric.ID, "Expected metric ID 'testMetric'")
 		assert.Equal(t, "gauge", metric.MType, "Expected metric type 'gauge'")
 		assert.NotNil(t, metric.Value, "Value should not be nil")
@@ -35,16 +39,14 @@ func TestMetricsSender_SendJSON(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 	}))
+	
 	defer server.Close()
 
-	// Создаем MetricsSender с адресом тестового сервера
 	sender := NewMetricsSender(server.Listener.Addr().String())
 
-	// Создаем тестовую метрику
 	value := 42.5
 	metric := Metrics{ID: "testMetric", MType: "gauge", Value: &value}
 
-	// Отправляем метрику
 	err := sender.SendJSON(metric)
 	assert.NoError(t, err, "Sending should not produce error")
 }
