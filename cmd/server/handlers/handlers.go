@@ -128,7 +128,8 @@ func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(metric)
+	rw.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(rw).Encode(metric)
 }
 
 func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
@@ -160,5 +161,6 @@ func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	rw.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(rw).Encode(metric)
+	rw.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(rw).Encode(metric)
 }
