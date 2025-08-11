@@ -35,7 +35,8 @@ func (h *Handler) HomeHandler(rw http.ResponseWriter, r *http.Request) {
 		body += counterName + ": " + strconv.FormatInt(value, 10) + "</br>"
 	}
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
-	rw.Write([]byte(body))
+	rw.WriteHeader(http.StatusOK)
+	_, _ = rw.Write([]byte(body))
 }
 
 func (h *Handler) UpdateHandler(rw http.ResponseWriter, r *http.Request) {
