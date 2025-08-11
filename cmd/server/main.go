@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
 	"net/http"
+	"os/signal"
+	"syscall"
 
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/handlers"
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage"
@@ -13,15 +16,20 @@ import (
 )
 
 func main() {
-	cfg := config.ParseFlags()
+	cfg := config.ParseServerFlags()
 
 	if err := logger.Init(); err != nil {
 		panic(err)
 	}
 
-	storage := storage.NewStorage()
-	router := chi.NewRouter()
+	storage := storage.NewStorage(cfg.FileStoragePath, cfg.StoreInterval, cfg.Restore)
+	defer storage.Close()
 
+	if cfg.StoreInterval > 0 {
+		go storage.RunBackup(cfg.StoreInterval)
+	}
+
+	router := chi.NewRouter()
 	router.Use(compressor.GzipMiddleware)
 
 	h := handlers.NewHandler(storage)
@@ -37,11 +45,28 @@ func main() {
 
 	logger.GetLogger().Info("Server started",
 		zap.String("address", cfg.ServerAddress),
+		zap.Duration("store_interval", cfg.StoreInterval),
+		zap.String("file_storage_path", cfg.FileStoragePath),
+		zap.Bool("restore", cfg.Restore),
 	)
 
-	err := http.ListenAndServe(cfg.ServerAddress, router)
-	if err != nil {
-		logger.GetLogger().Fatal("Server failed to start",
+	server := &http.Server{Addr: cfg.ServerAddress, Handler: router}
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.GetLogger().Fatal("Server failed to start",
+				zap.Error(err),
+			)
+		}
+	}()
+
+	<-ctx.Done()
+
+	logger.GetLogger().Info("Shutting down server...")
+	if err := server.Shutdown(context.Background()); err != nil {
+		logger.GetLogger().Fatal("Server forced to shutdown",
 			zap.Error(err),
 		)
 	}
