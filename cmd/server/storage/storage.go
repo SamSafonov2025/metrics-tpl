@@ -1,6 +1,9 @@
 package storage
 
 import (
+	"encoding/json"
+	"os"
+
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/metrics"
 )
 
@@ -57,5 +60,55 @@ func (s *MemStorage) UpdateCounter(name string, value metrics.Counter) error {
 
 func (s *MemStorage) UpdateGuage(name string, value metrics.Gauge) error {
 	s.gauges[name] = value
+	return nil
+}
+
+func (s *MemStorage) SaveToFile(filePath string) error {
+	data := struct {
+		Counters map[string]int64   `json:"counters"`
+		Gauges   map[string]float64 `json:"gauges"`
+	}{
+		Counters: s.GetAllCounters(),
+		Gauges:   s.GetAllGauges(),
+	}
+
+	file, err := os.Create(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(data)
+}
+
+func (s *MemStorage) LoadFromFile(filePath string) error {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	var data struct {
+		Counters map[string]int64   `json:"counters"`
+		Gauges   map[string]float64 `json:"gauges"`
+	}
+
+	if err := json.NewDecoder(file).Decode(&data); err != nil {
+		return err
+	}
+
+	s.counters = make(map[string]metrics.Counter)
+	s.gauges = make(map[string]metrics.Gauge)
+
+	for k, v := range data.Counters {
+		s.counters[k] = metrics.Counter(v)
+	}
+
+	for k, v := range data.Gauges {
+		s.gauges[k] = metrics.Gauge(v)
+	}
+
 	return nil
 }
