@@ -1,17 +1,23 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"net/http"
-	"net/url"
-	"path"
 	"runtime"
-	"strconv"
 	"time"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
 )
+
+type Metrics struct {
+	ID    string   `json:"id"`
+	MType string   `json:"type"`
+	Delta *int64   `json:"delta,omitempty"`
+	Value *float64 `json:"value,omitempty"`
+}
 
 type MetricsCollector struct {
 	pollCount int64
@@ -19,6 +25,10 @@ type MetricsCollector struct {
 
 func NewMetricsCollector() *MetricsCollector {
 	return &MetricsCollector{pollCount: 0}
+}
+
+func (m *MetricsCollector) IncrementPollCount() {
+	m.pollCount++
 }
 
 func (m *MetricsCollector) Collect() map[string]float64 {
@@ -54,10 +64,7 @@ func (m *MetricsCollector) Collect() map[string]float64 {
 		"Sys":           float64(memStats.Sys),
 		"TotalAlloc":    float64(memStats.TotalAlloc),
 		"RandomValue":   rand.Float64() * 100,
-		"PollCount":     float64(m.pollCount),
 	}
-
-	m.pollCount++
 	return metrics
 }
 
@@ -73,28 +80,30 @@ func NewMetricsSender(serverAddress string) *MetricsSender {
 	}
 }
 
-func (s *MetricsSender) Send(metricType, metricName string, value float64) {
-	metricValue := strconv.FormatFloat(value, 'f', -1, 64)
-	baseURL := fmt.Sprintf("http://%s", s.serverAddress)
-	u, _ := url.Parse(baseURL)
-	u.Path = path.Join("/update", metricType, metricName, metricValue)
-	url := u.String()
-
-	req, err := http.NewRequest(http.MethodPost, url, nil)
+func (s *MetricsSender) SendJSON(metric Metrics) error {
+	jsonData, err := json.Marshal(metric)
 	if err != nil {
-		fmt.Println("Error creating request:", err)
-		return
+		return err
 	}
-	req.Header.Set("Content-Type", "text/plain")
+
+	url := fmt.Sprintf("http://%s/update", s.serverAddress)
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.client.Do(req)
 	if err != nil {
-		fmt.Println("Error sending request:", err)
-		return
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("server returned non-200 status: %d", resp.StatusCode)
 	}
 
-	defer resp.Body.Close()
-	fmt.Printf("Metrics %s (%s) with value %s sent successfully\n", metricName, metricType, metricValue)
+	return nil
 }
 
 type Agent struct {
@@ -119,13 +128,22 @@ func (a *Agent) start() {
 	for {
 		select {
 		case <-ticker.C:
-			a.collector.Collect()
+			a.collector.IncrementPollCount()
 		case <-reportTicker.C:
 			metrics := a.collector.Collect()
 			for name, value := range metrics {
-				a.sender.Send("gauge", name, value)
+				val := value
+				err := a.sender.SendJSON(Metrics{ID: name, MType: "gauge", Value: &val})
+				if err != nil {
+					fmt.Printf("Error sending gauge %s: %v\n", name, err)
+				}
 			}
-			a.sender.Send("counter", "PollCount", float64(a.collector.pollCount-1))
+			delta := a.collector.pollCount
+			err := a.sender.SendJSON(Metrics{ID: "PollCount", MType: "counter", Delta: &delta})
+			if err != nil {
+				fmt.Printf("Error sending counter PollCount: %v\n", err)
+			}
+			a.collector.pollCount = 0
 		}
 	}
 }

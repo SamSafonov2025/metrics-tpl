@@ -26,6 +26,8 @@ func main() {
 	router.Get("/", logger.HandlerLog(h.HomeHandler))
 	router.Post("/update/{metricType}/{metricName}/{metricValue}", logger.HandlerLog(h.UpdateHandler))
 	router.Get("/value/{metricType}/{metricName}", logger.HandlerLog(h.GetHandler))
+	router.Post("/update", logger.HandlerLog(h.UpdateHandlerJSON))
+	router.Post("/value", logger.HandlerLog(h.ValueHandlerJSON))
 
 	logger.GetLogger().Info("Server started",
 		zap.String("address", cfg.ServerAddress),
