@@ -26,6 +26,11 @@ func main() {
 	router.Get("/", logger.HandlerLog(h.HomeHandler))
 	router.Post("/update/{metricType}/{metricName}/{metricValue}", logger.HandlerLog(h.UpdateHandler))
 	router.Get("/value/{metricType}/{metricName}", logger.HandlerLog(h.GetHandler))
+	// JSON-роуты: поддерживаем и со слэшем, и без
+	router.Post("/update", logger.HandlerLog(h.UpdateHandlerJSON))
+	router.Post("/update/", logger.HandlerLog(h.UpdateHandlerJSON))
+	router.Post("/value", logger.HandlerLog(h.ValueHandlerJSON))
+	router.Post("/value/", logger.HandlerLog(h.ValueHandlerJSON))
 
 	logger.GetLogger().Info("Server started",
 		zap.String("address", cfg.ServerAddress),

@@ -1,12 +1,20 @@
 package handlers
 
 import (
+	"encoding/json"
 	"net/http"
 	"strconv"
 
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage"
 	"github.com/go-chi/chi/v5"
 )
+
+type Metrics struct {
+	ID    string   `json:"id"`
+	MType string   `json:"type"`
+	Delta *int64   `json:"delta,omitempty"`
+	Value *float64 `json:"value,omitempty"`
+}
 
 type Handler struct {
 	storage *storage.MemStorage
@@ -87,4 +95,72 @@ func (h *Handler) GetHandler(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, "Invalid metric type", http.StatusBadRequest)
 		return
 	}
+}
+
+func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
+	var metric Metrics
+	err := json.NewDecoder(r.Body).Decode(&metric)
+	if err != nil {
+		http.Error(rw, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	switch metric.MType {
+	case "gauge":
+		if metric.Value == nil {
+			http.Error(rw, "Missing value for gauge", http.StatusBadRequest)
+			return
+		}
+		h.storage.SetGauge(metric.ID, *metric.Value)
+		value, _ := h.storage.GetGauge(metric.ID)
+		metric.Value = &value
+	case "counter":
+		if metric.Delta == nil {
+			http.Error(rw, "Missing delta for counter", http.StatusBadRequest)
+			return
+		}
+		h.storage.IncrementCounter(metric.ID, *metric.Delta)
+		value, _ := h.storage.GetCounter(metric.ID)
+		metric.Delta = &value
+	default:
+		http.Error(rw, "Invalid metric type", http.StatusBadRequest)
+		return
+	}
+
+	rw.Header().Set("Content-Type", "application/json")
+	rw.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(rw).Encode(metric)
+}
+
+func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
+	var metric Metrics
+	err := json.NewDecoder(r.Body).Decode(&metric)
+	if err != nil {
+		http.Error(rw, "Bad request", http.StatusBadRequest)
+		return
+	}
+
+	switch metric.MType {
+	case "gauge":
+		value, exists := h.storage.GetGauge(metric.ID)
+		if !exists {
+			http.Error(rw, "Metric not found", http.StatusNotFound)
+			return
+		}
+		metric.Value = &value
+	case "counter":
+		value, exists := h.storage.GetCounter(metric.ID)
+		if !exists {
+			http.Error(rw, "Metric not found", http.StatusNotFound)
+			return
+		}
+		metric.Delta = &value
+	default:
+		http.Error(rw, "Invalid metric type", http.StatusBadRequest)
+		return
+	}
+
+	rw.Header().Set("Content-Type", "application/json")
+	rw.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(rw).Encode(metric)
 }

@@ -1,62 +1,50 @@
 package main
 
 import (
-	"fmt"
-	"github.com/stretchr/testify/assert"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
-	"strconv"
-	"strings"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
 )
 
-func TestAgentSendMetrics(t *testing.T) {
-	// Создаем фейковый сервер
+func TestMetricsSender_SendJSON(t *testing.T) {
+	// Создаем тестовый сервер
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Проверяем, что URL имеет правильный формат
-		assert.Contains(t, r.URL.Path, "/update/", "Incorrect URL path")
+		// Проверяем путь
+		assert.Equal(t, "/update", r.URL.Path, "Expected path /update")
+		// Проверяем метод
+		assert.Equal(t, http.MethodPost, r.Method, "Expected POST method")
+		// Проверяем заголовок Content-Type
+		contentType := r.Header.Get("Content-Type")
+		assert.Equal(t, "application/json", contentType, "Expected Content-Type: application/json")
 
-		// Проверяем, что запрос содержит правильные метрики
-		pathParts := strings.Split(r.URL.Path, "/")
-		assert.Len(t, pathParts, 5, "URL path should have 5 parts")
+		// Декодируем тело
+		var metric Metrics
+		err := json.NewDecoder(r.Body).Decode(&metric)
+		if err != nil {
+			t.Fatalf("Failed to decode JSON: %v", err)
+		}
 
-		metricType := pathParts[2]
-		metricName := pathParts[3]
-		metricValue := pathParts[4]
+		// Проверяем метрику
+		assert.Equal(t, "testMetric", metric.ID, "Expected metric ID 'testMetric'")
+		assert.Equal(t, "gauge", metric.MType, "Expected metric type 'gauge'")
+		assert.NotNil(t, metric.Value, "Value should not be nil")
+		assert.Equal(t, 42.5, *metric.Value, "Expected value 42.5")
 
-		// Проверяем тип и значение метрики
-		assert.Equal(t, "gauge", metricType, "Metric type should be 'gauge'")
-		assert.Equal(t, "testMetric", metricName, "Metric name should be 'testMetric'")
-		assert.Equal(t, "42.5", metricValue, "Metric value should be '42.5'")
-
-		// Возвращаем 200 OK
 		w.WriteHeader(http.StatusOK)
 	}))
 	defer server.Close()
 
-	// Переопределим метод sendMetrics, чтобы он отправлял запросы на наш тестовый сервер
-	sendMetrics := func(metricType, metricName string, value float64) {
-		metricValue := strconv.FormatFloat(value, 'f', -1, 64)
-		baseURL, _ := url.Parse(server.URL)
-		baseURL.Path = fmt.Sprintf("/update/%s/%s/%s", metricType, metricName, metricValue)
-		req, err := http.NewRequest(http.MethodPost, baseURL.String(), nil)
-		if err != nil {
-			t.Fatalf("Error creating request: %v", err)
-		}
+	// Создаем MetricsSender с адресом тестового сервера
+	sender := NewMetricsSender(server.Listener.Addr().String())
 
-		req.Header.Set("Content-Type", "text/plain")
+	// Создаем тестовую метрику
+	value := 42.5
+	metric := Metrics{ID: "testMetric", MType: "gauge", Value: &value}
 
-		client := &http.Client{}
-		resp, err := client.Do(req)
-		if err != nil {
-			t.Fatalf("Error sending request: %v", err)
-		}
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusOK, resp.StatusCode, "Expected status 200 OK")
-	}
-
-	// Вызов отправки метрики
-	sendMetrics("gauge", "testMetric", 42.5)
+	// Отправляем метрику
+	err := sender.SendJSON(metric)
+	assert.NoError(t, err, "Sending should not produce error")
 }
