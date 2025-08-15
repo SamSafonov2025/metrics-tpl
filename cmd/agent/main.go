@@ -160,7 +160,7 @@ func (a *Agent) start() {
 }
 
 func main() {
-	cfg := config.ParseAgentFlags()
+	cfg := config.ParseFlags()
 
 	agent := NewAgent(
 		cfg.PollInterval,

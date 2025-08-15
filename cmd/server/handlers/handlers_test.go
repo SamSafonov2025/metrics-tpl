@@ -13,7 +13,7 @@ import (
 )
 
 func TestUpdateHandlerGaugeSuccess(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
@@ -32,7 +32,7 @@ func TestUpdateHandlerGaugeSuccess(t *testing.T) {
 }
 
 func TestUpdateHandlerCounterSuccess(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
@@ -51,7 +51,7 @@ func TestUpdateHandlerCounterSuccess(t *testing.T) {
 }
 
 func TestUpdateHandlerInvalidMetricType(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
@@ -66,7 +66,7 @@ func TestUpdateHandlerInvalidMetricType(t *testing.T) {
 }
 
 func TestGetHandlerGaugeSuccess(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	s.SetGauge("temperature", 23.5)
 	h := NewHandler(s)
 	router := chi.NewRouter()
@@ -82,7 +82,7 @@ func TestGetHandlerGaugeSuccess(t *testing.T) {
 }
 
 func TestGetHandlerCounterSuccess(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	s.IncrementCounter("hits", 10)
 	h := NewHandler(s)
 	router := chi.NewRouter()
@@ -98,7 +98,7 @@ func TestGetHandlerCounterSuccess(t *testing.T) {
 }
 
 func TestGetHandlerMetricNotFound(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Get("/value/{metricType}/{metricName}", h.GetHandler)
@@ -112,7 +112,7 @@ func TestGetHandlerMetricNotFound(t *testing.T) {
 }
 
 func TestHomeHandle(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	s.SetGauge("temperature", 23.5)
 	s.IncrementCounter("hits", 10)
 	h := NewHandler(s)
@@ -134,7 +134,7 @@ func TestHomeHandle(t *testing.T) {
 }
 
 func TestUpdateHandlerJSON_GaugeSuccess(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
@@ -164,7 +164,7 @@ func TestUpdateHandlerJSON_GaugeSuccess(t *testing.T) {
 }
 
 func TestUpdateHandlerJSON_CounterSuccess(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
@@ -194,7 +194,7 @@ func TestUpdateHandlerJSON_CounterSuccess(t *testing.T) {
 }
 
 func TestUpdateHandlerJSON_InvalidType(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
@@ -213,7 +213,7 @@ func TestUpdateHandlerJSON_InvalidType(t *testing.T) {
 }
 
 func TestUpdateHandlerJSON_MissingValue(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
@@ -231,7 +231,7 @@ func TestUpdateHandlerJSON_MissingValue(t *testing.T) {
 }
 
 func TestUpdateHandlerJSON_MissingDelta(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
@@ -249,7 +249,7 @@ func TestUpdateHandlerJSON_MissingDelta(t *testing.T) {
 }
 
 func TestValueHandlerJSON_GaugeSuccess(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	s.SetGauge("temperature", 23.5)
 	h := NewHandler(s)
 	router := chi.NewRouter()
@@ -275,7 +275,7 @@ func TestValueHandlerJSON_GaugeSuccess(t *testing.T) {
 }
 
 func TestValueHandlerJSON_CounterSuccess(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	s.IncrementCounter("hits", 10)
 	h := NewHandler(s)
 	router := chi.NewRouter()
@@ -301,7 +301,7 @@ func TestValueHandlerJSON_CounterSuccess(t *testing.T) {
 }
 
 func TestValueHandlerJSON_InvalidType(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/value", h.ValueHandlerJSON)
@@ -319,7 +319,7 @@ func TestValueHandlerJSON_InvalidType(t *testing.T) {
 }
 
 func TestValueHandlerJSON_MetricNotFound(t *testing.T) {
-	s := storage.NewStorage("", 0, false)
+	s := storage.NewStorage()
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/value", h.ValueHandlerJSON)
