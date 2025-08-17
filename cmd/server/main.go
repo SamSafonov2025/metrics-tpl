@@ -23,6 +23,7 @@ func main() {
 	}
 
 	storage := storage.NewStorage(cfg.FileStoragePath, cfg.StoreInterval, cfg.Restore)
+
 	defer storage.Close()
 
 	if cfg.StoreInterval > 0 {
