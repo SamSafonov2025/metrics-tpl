@@ -1,11 +1,13 @@
 package handlers
 
 import (
+	"context"
 	"encoding/json"
+	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage/memstorage"
 	"net/http"
 	"strconv"
 
-	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage"
+	"github.com/SamSafonov2025/metrics-tpl/cmd/server/postgres"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -17,11 +19,19 @@ type Metrics struct {
 }
 
 type Handler struct {
-	storage *storage.MemStorage
+	storage *memstorage.MemStorage
 }
 
-func NewHandler(storage *storage.MemStorage) *Handler {
+func NewHandler(storage *memstorage.MemStorage) *Handler {
 	return &Handler{storage: storage}
+}
+
+func (h *Handler) Ping(rw http.ResponseWriter, _ *http.Request) {
+	err := postgres.Pool.Ping(context.Background())
+	if err != nil {
+		rw.WriteHeader(http.StatusInternalServerError)
+	}
+	rw.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) HomeHandler(rw http.ResponseWriter, r *http.Request) {

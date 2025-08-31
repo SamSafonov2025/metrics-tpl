@@ -3,11 +3,11 @@ package handlers
 import (
 	"bytes"
 	"encoding/json"
+	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
-	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 )
