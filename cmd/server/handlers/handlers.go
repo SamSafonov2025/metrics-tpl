@@ -3,11 +3,12 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage/memstorage"
+	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
+	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
+
 	"net/http"
 	"strconv"
 
-	"github.com/SamSafonov2025/metrics-tpl/cmd/server/postgres"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -19,11 +20,11 @@ type Metrics struct {
 }
 
 type Handler struct {
-	storage *memstorage.MemStorage
+	Storage storage.Store
 }
 
-func NewHandler(storage *memstorage.MemStorage) *Handler {
-	return &Handler{storage: storage}
+func NewHandler(storage storage.Store) *Handler {
+	return &Handler{Storage: storage}
 }
 
 func (h *Handler) Ping(rw http.ResponseWriter, _ *http.Request) {
@@ -36,12 +37,12 @@ func (h *Handler) Ping(rw http.ResponseWriter, _ *http.Request) {
 
 func (h *Handler) HomeHandler(rw http.ResponseWriter, r *http.Request) {
 	body := "<h4>Gauges</h4>"
-	for gaugeName, value := range h.storage.GetAllGauges() {
+	for gaugeName, value := range h.Storage.GetAllGauges() {
 		body += gaugeName + ": " + strconv.FormatFloat(value, 'f', -1, 64) + "</br>"
 	}
 	body += "<h4>Counters</h4>"
 
-	for counterName, value := range h.storage.GetAllCounters() {
+	for counterName, value := range h.Storage.GetAllCounters() {
 		body += counterName + ": " + strconv.FormatInt(value, 10) + "</br>"
 	}
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -61,14 +62,14 @@ func (h *Handler) UpdateHandler(rw http.ResponseWriter, r *http.Request) {
 			http.Error(rw, "Bad request", http.StatusBadRequest)
 			return
 		}
-		h.storage.IncrementCounter(metricName, value)
+		h.Storage.IncrementCounter(metricName, value)
 	case "gauge":
 		value, err := strconv.ParseFloat(metricValue, 64)
 		if err != nil {
 			http.Error(rw, "Bad request", http.StatusBadRequest)
 			return
 		}
-		h.storage.SetGauge(metricName, value)
+		h.Storage.SetGauge(metricName, value)
 	default:
 		http.Error(rw, "Bad request", http.StatusBadRequest)
 		return
@@ -87,7 +88,7 @@ func (h *Handler) GetHandler(rw http.ResponseWriter, r *http.Request) {
 
 	switch metricType {
 	case "gauge":
-		value, exists := h.storage.GetGauge(metricName)
+		value, exists := h.Storage.GetGauge(metricName)
 		if !exists {
 			http.Error(rw, "Metric not found", http.StatusNotFound)
 			return
@@ -95,7 +96,7 @@ func (h *Handler) GetHandler(rw http.ResponseWriter, r *http.Request) {
 		rw.Header().Set("Content-type", "text/plain")
 		rw.Write([]byte(strconv.FormatFloat(value, 'f', -1, 64)))
 	case "counter":
-		value, exists := h.storage.GetCounter(metricName)
+		value, exists := h.Storage.GetCounter(metricName)
 		if !exists {
 			http.Error(rw, "Metric not found", http.StatusNotFound)
 			return
@@ -122,16 +123,16 @@ func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 			http.Error(rw, "Missing value for gauge", http.StatusBadRequest)
 			return
 		}
-		h.storage.SetGauge(metric.ID, *metric.Value)
-		value, _ := h.storage.GetGauge(metric.ID)
+		h.Storage.SetGauge(metric.ID, *metric.Value)
+		value, _ := h.Storage.GetGauge(metric.ID)
 		metric.Value = &value
 	case "counter":
 		if metric.Delta == nil {
 			http.Error(rw, "Missing delta for counter", http.StatusBadRequest)
 			return
 		}
-		h.storage.IncrementCounter(metric.ID, *metric.Delta)
-		value, _ := h.storage.GetCounter(metric.ID)
+		h.Storage.IncrementCounter(metric.ID, *metric.Delta)
+		value, _ := h.Storage.GetCounter(metric.ID)
 		metric.Delta = &value
 	default:
 		http.Error(rw, "Invalid metric type", http.StatusBadRequest)
@@ -153,14 +154,14 @@ func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 
 	switch metric.MType {
 	case "gauge":
-		value, exists := h.storage.GetGauge(metric.ID)
+		value, exists := h.Storage.GetGauge(metric.ID)
 		if !exists {
 			http.Error(rw, "Metric not found", http.StatusNotFound)
 			return
 		}
 		metric.Value = &value
 	case "counter":
-		value, exists := h.storage.GetCounter(metric.ID)
+		value, exists := h.Storage.GetCounter(metric.ID)
 		if !exists {
 			http.Error(rw, "Metric not found", http.StatusNotFound)
 			return
