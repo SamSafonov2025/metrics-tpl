@@ -1,4 +1,4 @@
-package storage
+package memstorage
 
 import (
 	"encoding/json"
