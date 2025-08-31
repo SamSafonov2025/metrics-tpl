@@ -3,6 +3,7 @@ package storage
 import (
 	metrics2 "github.com/SamSafonov2025/metrics-tpl/internal/metrics"
 	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
+	"log"
 	"sync"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -37,7 +38,8 @@ func NewStorage(cfg *config.ServerConfig) Store {
 		if cfg.Database != "" {
 			if postgres.Pool == nil {
 				if _, err := postgres.Connect(cfg.Database); err != nil {
-					// мягкий откат на память, если подключение не удалось
+					// логируем и мягко откатываемся на in-memory
+					log.Printf("storage: postgres connect failed, fallback to memstorage: %v", err)
 				}
 			}
 			if postgres.Pool != nil {
