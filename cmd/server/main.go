@@ -2,20 +2,14 @@ package main
 
 import (
 	"context"
-	"github.com/SamSafonov2025/metrics-tpl/cmd/server/postgres"
-	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage/filemanager"
-
-	//"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage/memstorage"
-	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage"
+	"github.com/SamSafonov2025/metrics-tpl/internal/router"
+	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
 	"net/http"
 	"os/signal"
 	"syscall"
 
-	"github.com/SamSafonov2025/metrics-tpl/cmd/server/handlers"
-	"github.com/SamSafonov2025/metrics-tpl/internal/compressor"
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
-	"github.com/go-chi/chi/v5"
 	"go.uber.org/zap"
 )
 
@@ -26,39 +20,10 @@ func main() {
 		panic(err)
 	}
 
-	memstorage := storage.NewStorage(cfg.FileStoragePath, cfg.StoreInterval, cfg.Restore)
-	//defer memstorage.Close()
+	s := storage.NewStorage(cfg)
+	defer storage.Close()
 
-	fm := filemanager.New(cfg.FileStoragePath)
-	defer fm.Close(memstorage)
-
-	if cfg.Restore {
-		if err := fm.LoadData(memstorage); err != nil {
-			logger.GetLogger().Warn("Restore failed",
-				zap.String("file", cfg.FileStoragePath), zap.Error(err))
-		}
-	}
-	if cfg.StoreInterval > 0 {
-		//go memstorage.RunBackup(cfg.StoreInterval)
-		go fm.RunBackup(cfg.StoreInterval, memstorage)
-	}
-
-	router := chi.NewRouter()
-	router.Use(compressor.GzipMiddleware)
-
-	h := handlers.NewHandler(memstorage)
-
-	router.Get("/", logger.HandlerLog(h.HomeHandler))
-	router.Post("/update/{metricType}/{metricName}/{metricValue}", logger.HandlerLog(h.UpdateHandler))
-	router.Get("/value/{metricType}/{metricName}", logger.HandlerLog(h.GetHandler))
-
-	router.Get("/ping", h.Ping)
-
-	// JSON-роуты: поддерживаем и со слэшем, и без
-	router.Post("/update", logger.HandlerLog(h.UpdateHandlerJSON))
-	router.Post("/update/", logger.HandlerLog(h.UpdateHandlerJSON))
-	router.Post("/value", logger.HandlerLog(h.ValueHandlerJSON))
-	router.Post("/value/", logger.HandlerLog(h.ValueHandlerJSON))
+	r := router.New(s)
 
 	logger.GetLogger().Info("Server started",
 		zap.String("address", cfg.ServerAddress),
@@ -67,12 +32,9 @@ func main() {
 		zap.Bool("restore", cfg.Restore),
 	)
 
-	server := &http.Server{Addr: cfg.ServerAddress, Handler: router}
+	server := &http.Server{Addr: cfg.ServerAddress, Handler: r}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-
-	postgres.Connect(cfg.Database)
-	defer postgres.Close()
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {

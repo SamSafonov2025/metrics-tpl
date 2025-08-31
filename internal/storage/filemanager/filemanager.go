@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"sync"
 	"time"
 )
 
@@ -24,8 +25,9 @@ type Metrics struct {
 }
 
 type FileManager struct {
-	FilePath string
-	Done     chan struct{}
+	FilePath  string
+	Done      chan struct{}
+	closeOnce sync.Once
 }
 
 func New(filePath string) *FileManager {
@@ -124,8 +126,12 @@ func (fm *FileManager) RunBackup(interval time.Duration, storage StorageInterfac
 }
 
 func (fm *FileManager) Close(storage StorageInterface) {
-	if fm.Done != nil {
-		close(fm.Done)
-	}
-	_ = fm.SaveData(storage)
+	fm.closeOnce.Do(func() {
+		// закрываем сигнал завершения один раз
+		if fm.Done != nil {
+			close(fm.Done)
+		}
+		// финальный сейв — игнорируем ошибку в тестах
+		_ = fm.SaveData(storage)
+	})
 }

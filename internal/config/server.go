@@ -23,7 +23,7 @@ func ParseServerFlags() *ServerConfig {
 	store := atoiEnv("STORE_INTERVAL", 300)
 	path := getEnv("FILE_STORAGE_PATH", "/tmp/metrics-db.json")
 	restore := boolEnv("RESTORE", false)
-	database := getEnv("DATABASE_DSN", "//postgresql://postgres:arzamas17@localhost:5432/yandex_go?schema=public")
+	database := getEnv("DATABASE_DSN", "postgresql://postgres:arzamas17@localhost:5432/yandex_go?sslmode=disable&search_path=public")
 
 	flag.StringVar(&cfg.ServerAddress, "a", addr, "HTTP server endpoint address")
 	flag.IntVar(&storeSeconds, "i", store, "Store interval in seconds (0 = sync mode)")

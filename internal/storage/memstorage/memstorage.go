@@ -1,15 +1,14 @@
 package memstorage
 
 import (
+	metrics2 "github.com/SamSafonov2025/metrics-tpl/internal/metrics"
 	"sync"
-
-	"github.com/SamSafonov2025/metrics-tpl/cmd/server/metrics"
 )
 
 type MemStorage struct {
 	mu       sync.RWMutex
-	Counters map[string]metrics.Counter
-	Gauges   map[string]metrics.Gauge
+	Counters map[string]metrics2.Counter
+	Gauges   map[string]metrics2.Gauge
 
 	// Раньше тут были FilePath/StoreSync/saveToFile — теперь файловой логики нет.
 }
@@ -17,13 +16,13 @@ type MemStorage struct {
 func (s *MemStorage) IncrementCounter(name string, value int64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.Counters[name] += metrics.Counter(value)
+	s.Counters[name] += metrics2.Counter(value)
 }
 
 func (s *MemStorage) SetGauge(name string, value float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.Gauges[name] = metrics.Gauge(value)
+	s.Gauges[name] = metrics2.Gauge(value)
 }
 
 func (s *MemStorage) GetCounter(name string) (int64, bool) {
@@ -61,14 +60,14 @@ func (s *MemStorage) GetAllGauges() map[string]float64 {
 }
 
 // Доп. методы, если они вам нужны в другом коде:
-func (s *MemStorage) UpdateCounter(name string, value metrics.Counter) error {
+func (s *MemStorage) UpdateCounter(name string, value metrics2.Counter) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Counters[name] += value
 	return nil
 }
 
-func (s *MemStorage) UpdateGuage(name string, value metrics.Gauge) error {
+func (s *MemStorage) UpdateGuage(name string, value metrics2.Gauge) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.Gauges[name] = value
