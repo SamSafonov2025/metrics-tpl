@@ -3,10 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage/memstorage"
 	"net/http"
 	"strconv"
 
-	"github.com/SamSafonov2025/metrics-tpl/cmd/server/memstorage"
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/postgres"
 	"github.com/go-chi/chi/v5"
 )

@@ -3,12 +3,15 @@ package main
 import (
 	"context"
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/postgres"
+	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage/filemanager"
+
+	//"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage/memstorage"
+	"github.com/SamSafonov2025/metrics-tpl/cmd/server/storage"
 	"net/http"
 	"os/signal"
 	"syscall"
 
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/handlers"
-	"github.com/SamSafonov2025/metrics-tpl/cmd/server/memstorage"
 	"github.com/SamSafonov2025/metrics-tpl/internal/compressor"
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
@@ -23,11 +26,21 @@ func main() {
 		panic(err)
 	}
 
-	memstorage := memstorage.NewStorage(cfg.FileStoragePath, cfg.StoreInterval, cfg.Restore)
-	defer memstorage.Close()
+	memstorage := storage.NewStorage(cfg.FileStoragePath, cfg.StoreInterval, cfg.Restore)
+	//defer memstorage.Close()
 
+	fm := filemanager.New(cfg.FileStoragePath)
+	defer fm.Close(memstorage)
+
+	if cfg.Restore {
+		if err := fm.LoadData(memstorage); err != nil {
+			logger.GetLogger().Warn("Restore failed",
+				zap.String("file", cfg.FileStoragePath), zap.Error(err))
+		}
+	}
 	if cfg.StoreInterval > 0 {
-		go memstorage.RunBackup(cfg.StoreInterval)
+		//go memstorage.RunBackup(cfg.StoreInterval)
+		go fm.RunBackup(cfg.StoreInterval, memstorage)
 	}
 
 	router := chi.NewRouter()
@@ -60,7 +73,7 @@ func main() {
 
 	postgres.Connect(cfg.Database)
 	defer postgres.Close()
-	
+
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.GetLogger().Fatal("Server failed to start",
