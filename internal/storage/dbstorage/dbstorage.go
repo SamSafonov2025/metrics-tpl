@@ -2,7 +2,6 @@ package dbstorage
 
 import (
 	"context"
-	"fmt"
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	"log"
 
@@ -136,81 +135,48 @@ func (db *DBStorage) GetAllCounters() map[string]int64 {
 	return counters
 }
 
-// SetMetrics — совместима со старым кодом: логирует ошибку и не паникует.
-func (db *DBStorage) SetMetrics(metrics []dto.Metrics) {
-	if err := db.setMetrics(context.Background(), metrics); err != nil {
-		log.Printf("SetMetrics error: %v", err)
-	}
-}
-
 // setMetrics — основная логика с контекстом и возвратом ошибки.
-func (db *DBStorage) setMetrics(ctx context.Context, metrics []dto.Metrics) error {
-	// Разносим по двум батчам: gauge и counter.
-	gaugeIDs := make([]string, 0, len(metrics))
-	gaugeVals := make([]float64, 0, len(metrics))
-
-	counterIDs := make([]string, 0, len(metrics))
-	counterVals := make([]int64, 0, len(metrics))
-
-	for _, m := range metrics {
-		switch m.MType {
-		case dto.MetricTypeGauge:
-			if m.Value == nil {
-				continue
-			}
-			gaugeIDs = append(gaugeIDs, m.ID)
-			gaugeVals = append(gaugeVals, *m.Value)
-
-		case dto.MetricTypeCounter:
-			if m.Delta == nil {
-				continue
-			}
-			counterIDs = append(counterIDs, m.ID)
-			counterVals = append(counterVals, *m.Delta)
-
-		default:
-			// Неподдерживаемый тип — просто пропускаем.
-			log.Printf("unknown metric type: %s (id=%s)", m.MType, m.ID)
-		}
-	}
-
-	tx, err := db.Pool.Begin(ctx)
+func (db *DBStorage) SetMetrics(metrics []dto.Metrics) {
+	tx, err := db.Pool.Begin(context.Background())
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		log.Printf("Error starting transaction: %s", err)
+		return
 	}
-	// Безопасный откат — неважно, уже был commit или нет.
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer func() {
+		if err != nil {
+			if rollbackErr := tx.Rollback(context.Background()); rollbackErr != nil {
+				log.Fatalf("Unable to rollback transaction: %v", rollbackErr)
+			}
+		}
+	}()
 
-	// Массовый upsert для gauge
-	if len(gaugeIDs) > 0 {
-		const qGauge = `
-			INSERT INTO public.gauge (id, value)
-			SELECT * FROM unnest($1::text[], $2::double precision[])
-			ON CONFLICT (id) DO UPDATE
-			SET value = EXCLUDED.value;
-		`
-		if _, err := tx.Exec(ctx, qGauge, gaugeIDs, gaugeVals); err != nil {
-			return fmt.Errorf("upsert gauge: %w", err)
+	for _, metric := range metrics {
+		if metric.MType == dto.MetricTypeGauge && metric.Value != nil {
+			q := `INSERT INTO gauge (id, value)
+					VALUES ($1, $2)
+					ON CONFLICT (id) DO UPDATE
+					SET value = excluded.value;`
+			_, err = tx.Exec(context.Background(), q, metric.ID, *metric.Value)
+			if err != nil {
+				log.Printf("Error inserting gauge metric: %v", err)
+			}
+		} else if metric.MType == dto.MetricTypeCounter && metric.Delta != nil {
+			q := `INSERT INTO counter (id, value)
+    				VALUES ($1, $2)
+					ON CONFLICT (id) DO UPDATE
+					SET value = counter.value + excluded.value;`
+			_, err = tx.Exec(context.Background(), q, metric.ID, *metric.Delta)
+			if err != nil {
+				log.Printf("Error inserting counter metric: %v", err)
+			}
+		} else {
+			log.Printf("Unknown metric type or metric value is nil: %s, %s", metric.MType, metric.ID)
 		}
 	}
-
-	// Массовый upsert для counter (+= delta)
-	if len(counterIDs) > 0 {
-		const qCounter = `
-			INSERT INTO public.counter (id, value)
-			SELECT * FROM unnest($1::text[], $2::bigint[])
-			ON CONFLICT (id) DO UPDATE
-			SET value = public.counter.value + EXCLUDED.value;
-		`
-		if _, err := tx.Exec(ctx, qCounter, counterIDs, counterVals); err != nil {
-			return fmt.Errorf("upsert counter: %w", err)
-		}
+	err = tx.Commit(context.Background())
+	if err != nil {
+		log.Fatalf("Unable to commit transaction: %v", err)
 	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit tx: %w", err)
-	}
-	return nil
 }
 
 func (db *DBStorage) StorageType() string {
