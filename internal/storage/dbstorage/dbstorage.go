@@ -2,6 +2,7 @@ package dbstorage
 
 import (
 	"context"
+	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	"log"
 
 	"github.com/jackc/pgx/v5"
@@ -132,4 +133,52 @@ func (db *DBStorage) GetAllCounters() map[string]int64 {
 		return nil
 	}
 	return counters
+}
+
+// setMetrics — основная логика с контекстом и возвратом ошибки.
+func (db *DBStorage) SetMetrics(metrics []dto.Metrics) {
+	tx, err := db.Pool.Begin(context.Background())
+	if err != nil {
+		log.Printf("Error starting transaction: %s", err)
+		return
+	}
+	defer func() {
+		if err != nil {
+			if rollbackErr := tx.Rollback(context.Background()); rollbackErr != nil {
+				log.Fatalf("Unable to rollback transaction: %v", rollbackErr)
+			}
+		}
+	}()
+
+	for _, metric := range metrics {
+		if metric.MType == dto.MetricTypeGauge && metric.Value != nil {
+			q := `INSERT INTO gauge (id, value)
+					VALUES ($1, $2)
+					ON CONFLICT (id) DO UPDATE
+					SET value = excluded.value;`
+			_, err = tx.Exec(context.Background(), q, metric.ID, *metric.Value)
+			if err != nil {
+				log.Printf("Error inserting gauge metric: %v", err)
+			}
+		} else if metric.MType == dto.MetricTypeCounter && metric.Delta != nil {
+			q := `INSERT INTO counter (id, value)
+    				VALUES ($1, $2)
+					ON CONFLICT (id) DO UPDATE
+					SET value = counter.value + excluded.value;`
+			_, err = tx.Exec(context.Background(), q, metric.ID, *metric.Delta)
+			if err != nil {
+				log.Printf("Error inserting counter metric: %v", err)
+			}
+		} else {
+			log.Printf("Unknown metric type or metric value is nil: %s, %s", metric.MType, metric.ID)
+		}
+	}
+	err = tx.Commit(context.Background())
+	if err != nil {
+		log.Fatalf("Unable to commit transaction: %v", err)
+	}
+}
+
+func (db *DBStorage) StorageType() string {
+	return "db"
 }

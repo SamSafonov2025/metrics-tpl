@@ -9,18 +9,19 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
+	"github.com/SamSafonov2025/metrics-tpl/internal/interfaces"
 	"github.com/SamSafonov2025/metrics-tpl/internal/storage/dbstorage"
 	"github.com/SamSafonov2025/metrics-tpl/internal/storage/filemanager"
 	"github.com/SamSafonov2025/metrics-tpl/internal/storage/memstorage"
 )
 
 // Общий интерфейс стораджа (совпадает с тем, что использует FileManager)
-type Store = filemanager.StorageInterface
+//type Store = filemanager.StorageInterface
 
 var (
 	once     sync.Once
 	curFM    *filemanager.FileManager
-	curStore Store
+	curStore interfaces.Store
 )
 
 // NewStorage — единая точка инициализации стораджа + FileManager из конфигурации.
@@ -32,7 +33,7 @@ var (
 // либо выполняет разовый сейв на старте, если задан cfg.FileStoragePath и интервал = 0.
 //
 // Вызывайте один раз. Повторные вызовы вернут уже созданный store.
-func NewStorage(cfg *config.ServerConfig) Store {
+func NewStorage(cfg *config.ServerConfig) interfaces.Store {
 	once.Do(func() {
 		// Выбор реализации ТОЛЬКО по cfg.Database (никакой магии от чужого Pool)
 		if cfg.Database != "" {
@@ -80,14 +81,14 @@ func Close() {
 
 // --- Вспомогательные фабрики (если нужно напрямую) ---
 
-func NewMem() Store {
+func NewMem() interfaces.Store {
 	return &memstorage.MemStorage{
 		Counters: make(map[string]metrics2.Counter),
 		Gauges:   make(map[string]metrics2.Gauge),
 	}
 }
 
-func NewDB(pool *pgxpool.Pool) Store {
+func NewDB(pool *pgxpool.Pool) interfaces.Store {
 	return &dbstorage.DBStorage{Pool: pool}
 }
 
