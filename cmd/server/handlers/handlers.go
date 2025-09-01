@@ -54,26 +54,34 @@ func (h *Handler) UpdateHandler(rw http.ResponseWriter, r *http.Request) {
 	metricName := chi.URLParam(r, "metricName")
 	metricValue := chi.URLParam(r, "metricValue")
 
-	var err error
 	switch metricType {
 	case "counter":
-		var val int64
-		if val, err = strconv.ParseInt(metricValue, 10, 64); err == nil {
-			err = h.Storage.IncrementCounter(r.Context(), metricName, val)
+		val, err := strconv.ParseInt(metricValue, 10, 64)
+		if err != nil {
+			http.Error(rw, "Bad request", http.StatusBadRequest)
+			return
 		}
+		if err := h.Storage.IncrementCounter(r.Context(), metricName, val); err != nil {
+			http.Error(rw, "internal error", http.StatusInternalServerError)
+			return
+		}
+
 	case "gauge":
-		var val float64
-		if val, err = strconv.ParseFloat(metricValue, 64); err == nil {
-			err = h.Storage.SetGauge(r.Context(), metricName, val)
+		val, err := strconv.ParseFloat(metricValue, 64)
+		if err != nil {
+			http.Error(rw, "Bad request", http.StatusBadRequest)
+			return
 		}
+		if err := h.Storage.SetGauge(r.Context(), metricName, val); err != nil {
+			http.Error(rw, "internal error", http.StatusInternalServerError)
+			return
+		}
+
 	default:
 		http.Error(rw, "Bad request", http.StatusBadRequest)
 		return
 	}
-	if err != nil {
-		http.Error(rw, "internal error", http.StatusInternalServerError)
-		return
-	}
+
 	rw.WriteHeader(http.StatusOK)
 }
 
