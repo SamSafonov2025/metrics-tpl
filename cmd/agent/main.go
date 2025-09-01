@@ -260,6 +260,19 @@ func (a *Agent) Start(ctx context.Context) {
 	}
 }
 
+// --- Backward-compat wrappers for tests ---
+
+// SendJSON — старая сигнатура, нужна для тестов.
+// Делегирует в SendJSONCtx с context.Background().
+func (s *MetricsSender) SendJSON(metric Metrics) error {
+	return s.SendJSONCtx(context.Background(), metric)
+}
+
+// SendBatchJSON — на случай, если тесты дернут батч без ctx.
+func (s *MetricsSender) SendBatchJSON(batch []Metrics) error {
+	return s.SendBatchJSONCtx(context.Background(), batch)
+}
+
 func main() {
 	cfg := config.ParseAgentFlags()
 
