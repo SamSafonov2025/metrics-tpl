@@ -3,8 +3,10 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
-	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
+
+	"github.com/SamSafonov2025/metrics-tpl/internal/interfaces"
 
 	"net/http"
 	"strconv"
@@ -20,10 +22,10 @@ type Metrics struct {
 }
 
 type Handler struct {
-	Storage storage.Store
+	Storage interfaces.Store
 }
 
-func NewHandler(storage storage.Store) *Handler {
+func NewHandler(storage interfaces.Store) *Handler {
 	return &Handler{Storage: storage}
 }
 
@@ -175,4 +177,16 @@ func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(rw).Encode(metric)
+}
+
+func (h *Handler) UpdateMetrics(rw http.ResponseWriter, r *http.Request) {
+	var body []dto.Metrics
+	rw.Header().Set("Content-Type", "application/json")
+	err := json.NewDecoder(r.Body).Decode(&body)
+	if err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+	h.Storage.SetMetrics(body)
+	rw.WriteHeader(http.StatusOK)
 }

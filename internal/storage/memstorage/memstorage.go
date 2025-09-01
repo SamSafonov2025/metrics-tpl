@@ -1,7 +1,9 @@
 package memstorage
 
 import (
+	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	metrics2 "github.com/SamSafonov2025/metrics-tpl/internal/metrics"
+	"log"
 	"sync"
 )
 
@@ -72,4 +74,19 @@ func (s *MemStorage) UpdateGuage(name string, value metrics2.Gauge) error {
 	defer s.mu.Unlock()
 	s.Gauges[name] = value
 	return nil
+}
+
+func (m *MemStorage) SetMetrics(metrics []dto.Metrics) {
+	for _, metric := range metrics {
+		if metric.MType == dto.MetricTypeCounter {
+			m.IncrementCounter(metric.ID, *metric.Delta)
+		} else if metric.MType == dto.MetricTypeGauge {
+			m.SetGauge(metric.ID, *metric.Value)
+		} else {
+			log.Printf("Unknown metric type: %s", metric.MType)
+		}
+	}
+}
+func (m *MemStorage) StorageType() string {
+	return "ms"
 }

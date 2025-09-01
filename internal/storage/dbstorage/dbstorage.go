@@ -2,6 +2,8 @@ package dbstorage
 
 import (
 	"context"
+	"fmt"
+	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	"log"
 
 	"github.com/jackc/pgx/v5"
@@ -132,4 +134,85 @@ func (db *DBStorage) GetAllCounters() map[string]int64 {
 		return nil
 	}
 	return counters
+}
+
+// SetMetrics — совместима со старым кодом: логирует ошибку и не паникует.
+func (db *DBStorage) SetMetrics(metrics []dto.Metrics) {
+	if err := db.setMetrics(context.Background(), metrics); err != nil {
+		log.Printf("SetMetrics error: %v", err)
+	}
+}
+
+// setMetrics — основная логика с контекстом и возвратом ошибки.
+func (db *DBStorage) setMetrics(ctx context.Context, metrics []dto.Metrics) error {
+	// Разносим по двум батчам: gauge и counter.
+	gaugeIDs := make([]string, 0, len(metrics))
+	gaugeVals := make([]float64, 0, len(metrics))
+
+	counterIDs := make([]string, 0, len(metrics))
+	counterVals := make([]int64, 0, len(metrics))
+
+	for _, m := range metrics {
+		switch m.MType {
+		case dto.MetricTypeGauge:
+			if m.Value == nil {
+				continue
+			}
+			gaugeIDs = append(gaugeIDs, m.ID)
+			gaugeVals = append(gaugeVals, *m.Value)
+
+		case dto.MetricTypeCounter:
+			if m.Delta == nil {
+				continue
+			}
+			counterIDs = append(counterIDs, m.ID)
+			counterVals = append(counterVals, *m.Delta)
+
+		default:
+			// Неподдерживаемый тип — просто пропускаем.
+			log.Printf("unknown metric type: %s (id=%s)", m.MType, m.ID)
+		}
+	}
+
+	tx, err := db.Pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	// Безопасный откат — неважно, уже был commit или нет.
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	// Массовый upsert для gauge
+	if len(gaugeIDs) > 0 {
+		const qGauge = `
+			INSERT INTO public.gauge (id, value)
+			SELECT * FROM unnest($1::text[], $2::double precision[])
+			ON CONFLICT (id) DO UPDATE
+			SET value = EXCLUDED.value;
+		`
+		if _, err := tx.Exec(ctx, qGauge, gaugeIDs, gaugeVals); err != nil {
+			return fmt.Errorf("upsert gauge: %w", err)
+		}
+	}
+
+	// Массовый upsert для counter (+= delta)
+	if len(counterIDs) > 0 {
+		const qCounter = `
+			INSERT INTO public.counter (id, value)
+			SELECT * FROM unnest($1::text[], $2::bigint[])
+			ON CONFLICT (id) DO UPDATE
+			SET value = public.counter.value + EXCLUDED.value;
+		`
+		if _, err := tx.Exec(ctx, qCounter, counterIDs, counterVals); err != nil {
+			return fmt.Errorf("upsert counter: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit tx: %w", err)
+	}
+	return nil
+}
+
+func (db *DBStorage) StorageType() string {
+	return "db"
 }

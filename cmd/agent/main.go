@@ -11,32 +11,22 @@ import (
 	"time"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
+	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 )
-
-type Metrics struct {
-	ID    string   `json:"id"`
-	MType string   `json:"type"`
-	Delta *int64   `json:"delta,omitempty"`
-	Value *float64 `json:"value,omitempty"`
-}
 
 type MetricsCollector struct {
 	pollCount int64
 }
 
-func NewMetricsCollector() *MetricsCollector {
-	return &MetricsCollector{pollCount: 0}
-}
+func NewMetricsCollector() *MetricsCollector { return &MetricsCollector{pollCount: 0} }
 
-func (m *MetricsCollector) IncrementPollCount() {
-	m.pollCount++
-}
+func (m *MetricsCollector) IncrementPollCount() { m.pollCount++ }
 
 func (m *MetricsCollector) Collect() map[string]float64 {
 	memStats := new(runtime.MemStats)
 	runtime.ReadMemStats(memStats)
 
-	metrics := map[string]float64{
+	return map[string]float64{
 		"Alloc":         float64(memStats.Alloc),
 		"BuckHashSys":   float64(memStats.BuckHashSys),
 		"Frees":         float64(memStats.Frees),
@@ -66,7 +56,6 @@ func (m *MetricsCollector) Collect() map[string]float64 {
 		"TotalAlloc":    float64(memStats.TotalAlloc),
 		"RandomValue":   rand.Float64() * 100,
 	}
-	return metrics
 }
 
 type MetricsSender struct {
@@ -81,8 +70,9 @@ func NewMetricsSender(serverAddress string) *MetricsSender {
 	}
 }
 
-func (s *MetricsSender) SendJSON(metric Metrics) error {
-	jsonData, err := json.Marshal(metric)
+// общая отправка gz+json на произвольный путь
+func (s *MetricsSender) postGzJSON(path string, payload any) error {
+	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
@@ -96,7 +86,7 @@ func (s *MetricsSender) SendJSON(metric Metrics) error {
 		return err
 	}
 
-	url := fmt.Sprintf("http://%s/update", s.serverAddress)
+	url := fmt.Sprintf("http://%s%s", s.serverAddress, path)
 	req, err := http.NewRequest(http.MethodPost, url, &buf)
 	if err != nil {
 		return err
@@ -113,8 +103,33 @@ func (s *MetricsSender) SendJSON(metric Metrics) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("server returned non-200 status: %d", resp.StatusCode)
 	}
-
 	return nil
+}
+
+// одиночная метрика (как было)
+func (s *MetricsSender) SendJSON(metric dto.Metrics) error {
+	return s.postGzJSON("/update", metric) // на сервере есть /update и /update/
+}
+
+// НОВОЕ: батч метрик
+func (s *MetricsSender) SendBatchJSON(batch []dto.Metrics) error {
+	if len(batch) == 0 {
+		return nil
+	}
+	// основной путь — /updates/ (обратите внимание на слэш в конце: роутер регистрирует именно его)
+	if err := s.postGzJSON("/updates/", batch); err == nil {
+		return nil
+	} else {
+		// фолбэк: по одной, чтобы не терять данные
+		fmt.Printf("Batch send failed (%v), falling back to single sends...\n", err)
+		var firstErr error
+		for _, m := range batch {
+			if e := s.SendJSON(m); e != nil && firstErr == nil {
+				firstErr = e
+			}
+		}
+		return firstErr
+	}
 }
 
 type Agent struct {
@@ -140,21 +155,27 @@ func (a *Agent) start() {
 		select {
 		case <-ticker.C:
 			a.collector.IncrementPollCount()
+
 		case <-reportTicker.C:
-			metrics := a.collector.Collect()
-			for name, value := range metrics {
+			// собираем батч
+			collected := a.collector.Collect()
+			batch := make([]dto.Metrics, 0, len(collected)+1)
+
+			for name, value := range collected {
 				val := value
-				err := a.sender.SendJSON(Metrics{ID: name, MType: "gauge", Value: &val})
-				if err != nil {
-					fmt.Printf("Error sending gauge %s: %v\n", name, err)
-				}
+				batch = append(batch, dto.Metrics{ID: name, MType: "gauge", Value: &val})
 			}
+
 			delta := a.collector.pollCount
-			err := a.sender.SendJSON(Metrics{ID: "PollCount", MType: "counter", Delta: &delta})
-			if err != nil {
-				fmt.Printf("Error sending counter PollCount: %v\n", err)
+			batch = append(batch, dto.Metrics{ID: "PollCount", MType: "counter", Delta: &delta})
+
+			// отправляем батчом; обнуляем счётчик только при успехе
+			if err := a.sender.SendBatchJSON(batch); err != nil {
+				fmt.Printf("Error sending batch: %v\n", err)
+				// не обнуляем pollCount — пусть наберётся к следующему репорту
+			} else {
+				a.collector.pollCount = 0
 			}
-			a.collector.pollCount = 0
 		}
 	}
 }

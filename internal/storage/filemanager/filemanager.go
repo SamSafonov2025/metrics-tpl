@@ -6,23 +6,12 @@ import (
 	"os"
 	"sync"
 	"time"
+
+	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
+	"github.com/SamSafonov2025/metrics-tpl/internal/interfaces"
 )
 
-type StorageInterface interface {
-	SetGauge(metricName string, value float64)
-	IncrementCounter(metricName string, value int64)
-	GetGauge(metricName string) (float64, bool)
-	GetCounter(metricName string) (int64, bool)
-	GetAllGauges() map[string]float64
-	GetAllCounters() map[string]int64
-}
-
-type Metrics struct {
-	ID    string   `json:"id"`
-	MType string   `json:"type"`
-	Delta *int64   `json:"delta,omitempty"` // counter (абсолютное значение)
-	Value *float64 `json:"value,omitempty"` // gauge
-}
+type StorageInterface = interfaces.Store
 
 type FileManager struct {
 	FilePath  string
@@ -43,14 +32,14 @@ func (fm *FileManager) SaveData(storage StorageInterface) error {
 	}
 
 	// собираем метрики из стораджа
-	var out []Metrics
+	var out []dto.Metrics
 	for k, v := range storage.GetAllCounters() {
 		val := v
-		out = append(out, Metrics{ID: k, MType: "counter", Delta: &val})
+		out = append(out, dto.Metrics{ID: k, MType: "counter", Delta: &val})
 	}
 	for k, v := range storage.GetAllGauges() {
 		val := v
-		out = append(out, Metrics{ID: k, MType: "gauge", Value: &val})
+		out = append(out, dto.Metrics{ID: k, MType: "gauge", Value: &val})
 	}
 
 	f, err := os.Create(fm.FilePath)
@@ -74,7 +63,7 @@ func (fm *FileManager) LoadData(storage StorageInterface) error {
 	}
 	defer f.Close()
 
-	var items []Metrics
+	var items []dto.Metrics
 	dec := json.NewDecoder(f)
 	if err := dec.Decode(&items); err != nil {
 		return err

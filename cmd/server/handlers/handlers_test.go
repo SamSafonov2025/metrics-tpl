@@ -1,18 +1,21 @@
 package handlers
 
 import (
+	"bytes"
+	"encoding/json"
+	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
-	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
+	"github.com/SamSafonov2025/metrics-tpl/internal/interfaces"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 )
 
 // helper: выдаёт чистый сторадж на каждый тест
-func newTestStore(t *testing.T) storage.Store {
+func newTestStore(t *testing.T) interfaces.Store {
 	t.Helper()
 	storage.TestReset() // сброс синглтона между тестами
 
@@ -72,7 +75,6 @@ func TestUpdateHandlerCounterSuccess(t *testing.T) {
 	assert.Equal(t, int64(10), value)
 }
 
-/*
 func TestUpdateHandlerInvalidMetricType(t *testing.T) {
 	s := newTestStore(t)
 	h := NewHandler(s)
@@ -358,4 +360,3 @@ func TestValueHandlerJSON_MetricNotFound(t *testing.T) {
 
 	assert.Equal(t, http.StatusNotFound, rr.Code)
 }
-*/

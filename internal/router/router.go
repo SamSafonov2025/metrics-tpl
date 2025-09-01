@@ -5,12 +5,12 @@ import (
 
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/handlers"
 	"github.com/SamSafonov2025/metrics-tpl/internal/compressor"
+	"github.com/SamSafonov2025/metrics-tpl/internal/interfaces"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
-	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
 )
 
 // New строит chi.Router и регистрирует все маршруты приложения.
-func New(s storage.Store) *chi.Mux {
+func New(s interfaces.Store) *chi.Mux {
 	r := chi.NewRouter()
 	r.Use(compressor.GzipMiddleware)
 
@@ -27,6 +27,8 @@ func New(s storage.Store) *chi.Mux {
 	r.Post("/update/", logger.HandlerLog(h.UpdateHandlerJSON))
 	r.Post("/value", logger.HandlerLog(h.ValueHandlerJSON))
 	r.Post("/value/", logger.HandlerLog(h.ValueHandlerJSON))
+
+	r.Post("/updates/", h.UpdateMetrics)
 
 	return r
 }
