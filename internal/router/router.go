@@ -28,7 +28,9 @@ func New(s interfaces.Store) *chi.Mux {
 	r.Post("/value", logger.HandlerLog(h.ValueHandlerJSON))
 	r.Post("/value/", logger.HandlerLog(h.ValueHandlerJSON))
 
-	r.Post("/updates/", h.UpdateMetrics)
+	// БАТЧ: тоже со слэшем и без + логгер
+	r.Post("/updates", logger.HandlerLog(h.UpdateMetrics))
+	r.Post("/updates/", logger.HandlerLog(h.UpdateMetrics))
 
 	return r
 }

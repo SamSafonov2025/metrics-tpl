@@ -3,7 +3,6 @@ package dbstorage
 import (
 	"context"
 	"errors"
-	"fmt"
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	//"github.com/jackc/pgx/v5/pgconn"
 	"log"
@@ -145,6 +144,7 @@ func (db *DBStorage) GetAllCounters(ctx context.Context) map[string]int64 {
 	return counters
 }
 
+/*
 // Пакетная запись метрик с ретраями
 func (db *DBStorage) SetMetrics(ctx context.Context, metrics []dto.Metrics) error {
 	once := func(ctx context.Context) error {
@@ -205,6 +205,61 @@ func (db *DBStorage) SetMetrics(ctx context.Context, metrics []dto.Metrics) erro
 	}
 
 	return retryCtx(ctx, once)
+}
+*/
+
+func (db *DBStorage) SetMetrics(ctx context.Context, metrics []dto.Metrics) {
+	tx, err := db.Pool.Begin(context.Background())
+	if err != nil {
+		log.Printf("Error starting transaction: %s", err)
+		return
+	}
+	defer func() {
+		if err != nil {
+			if rollbackErr := tx.Rollback(context.Background()); rollbackErr != nil {
+				log.Fatalf("Unable to rollback transaction: %v", rollbackErr)
+			}
+		}
+	}()
+
+	for _, metric := range metrics {
+		if metric.MType == dto.MetricTypeGauge && metric.Value != nil {
+			err = db.InsertOrUpdateGauge(ctx, metric.ID, *metric.Value)
+			if err != nil {
+				log.Printf("Error inserting gauge metric: %v", err)
+			}
+		} else if metric.MType == dto.MetricTypeCounter && metric.Delta != nil {
+			err = db.InsertOrUpdateCounter(ctx, metric.ID, *metric.Delta)
+			if err != nil {
+				log.Printf("Error inserting counter metric: %v", err)
+			}
+		} else {
+			log.Printf("Unknown metric type or metric value is nil: %s, %s", metric.MType, metric.ID)
+		}
+	}
+
+	err = tx.Commit(context.Background())
+	if err != nil {
+		log.Fatalf("Unable to commit transaction: %v", err)
+	}
+}
+
+func (db *DBStorage) InsertOrUpdateGauge(ctx context.Context, metricID string, value float64) error {
+	q := `INSERT INTO gauge (id, value)
+			VALUES ($1, $2)
+			ON CONFLICT (id) DO UPDATE
+			SET value = excluded.value;`
+	_, err := db.Pool.Exec(ctx, q, metricID, value)
+	return err
+}
+
+func (db *DBStorage) InsertOrUpdateCounter(ctx context.Context, metricID string, delta int64) error {
+	q := `INSERT INTO counter (id, value)
+			VALUES ($1, $2)
+			ON CONFLICT (id) DO UPDATE
+			SET value = public.counter.value + excluded.value;`
+	_, err := db.Pool.Exec(ctx, q, metricID, delta)
+	return err
 }
 
 func (db *DBStorage) StorageType() string {
