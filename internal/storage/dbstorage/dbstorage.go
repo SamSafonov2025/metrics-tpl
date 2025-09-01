@@ -208,11 +208,11 @@ func (db *DBStorage) SetMetrics(ctx context.Context, metrics []dto.Metrics) erro
 }
 */
 
-func (db *DBStorage) SetMetrics(ctx context.Context, metrics []dto.Metrics) {
+func (db *DBStorage) SetMetrics(ctx context.Context, metrics []dto.Metrics) error {
 	tx, err := db.Pool.Begin(context.Background())
 	if err != nil {
 		log.Printf("Error starting transaction: %s", err)
-		return
+		return err
 	}
 	defer func() {
 		if err != nil {
@@ -242,6 +242,8 @@ func (db *DBStorage) SetMetrics(ctx context.Context, metrics []dto.Metrics) {
 	if err != nil {
 		log.Fatalf("Unable to commit transaction: %v", err)
 	}
+
+	return nil
 }
 
 func (db *DBStorage) InsertOrUpdateGauge(ctx context.Context, metricID string, value float64) error {
