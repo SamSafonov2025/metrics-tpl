@@ -3,53 +3,50 @@ package handlers
 import (
 	"context"
 	"encoding/json"
-	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
-	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
-
-	"github.com/SamSafonov2025/metrics-tpl/internal/interfaces"
-
 	"net/http"
 	"strconv"
+	"strings"
+	"time"
 
+	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
+	"github.com/SamSafonov2025/metrics-tpl/internal/interfaces"
+	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
 	"github.com/go-chi/chi/v5"
 )
-
-type Metrics struct {
-	ID    string   `json:"id"`
-	MType string   `json:"type"`
-	Delta *int64   `json:"delta,omitempty"`
-	Value *float64 `json:"value,omitempty"`
-}
 
 type Handler struct {
 	Storage interfaces.Store
 }
 
-func NewHandler(storage interfaces.Store) *Handler {
-	return &Handler{Storage: storage}
-}
+func NewHandler(storage interfaces.Store) *Handler { return &Handler{Storage: storage} }
 
-func (h *Handler) Ping(rw http.ResponseWriter, _ *http.Request) {
-	err := postgres.Pool.Ping(context.Background())
-	if err != nil {
+func (h *Handler) Ping(rw http.ResponseWriter, r *http.Request) {
+	if err := postgres.Pool.Ping(r.Context()); err != nil {
 		rw.WriteHeader(http.StatusInternalServerError)
+		return
 	}
 	rw.WriteHeader(http.StatusOK)
 }
 
 func (h *Handler) HomeHandler(rw http.ResponseWriter, r *http.Request) {
-	body := "<h4>Gauges</h4>"
-	for gaugeName, value := range h.Storage.GetAllGauges() {
-		body += gaugeName + ": " + strconv.FormatFloat(value, 'f', -1, 64) + "</br>"
-	}
-	body += "<h4>Counters</h4>"
+	var sb strings.Builder
+	sb.WriteString("<h4>Gauges</h4>")
 
-	for counterName, value := range h.Storage.GetAllCounters() {
-		body += counterName + ": " + strconv.FormatInt(value, 10) + "</br>"
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	for name, v := range h.Storage.GetAllGauges(ctx) {
+		sb.WriteString(name + ": " + strconv.FormatFloat(v, 'f', -1, 64) + "</br>")
 	}
+
+	sb.WriteString("<h4>Counters</h4>")
+	for name, v := range h.Storage.GetAllCounters(ctx) {
+		sb.WriteString(name + ": " + strconv.FormatInt(v, 10) + "</br>")
+	}
+
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(http.StatusOK)
-	_, _ = rw.Write([]byte(body))
+	_, _ = rw.Write([]byte(sb.String()))
 }
 
 func (h *Handler) UpdateHandler(rw http.ResponseWriter, r *http.Request) {
@@ -57,23 +54,24 @@ func (h *Handler) UpdateHandler(rw http.ResponseWriter, r *http.Request) {
 	metricName := chi.URLParam(r, "metricName")
 	metricValue := chi.URLParam(r, "metricValue")
 
+	var err error
 	switch metricType {
 	case "counter":
-		value, err := strconv.ParseInt(metricValue, 10, 64)
-		if err != nil {
-			http.Error(rw, "Bad request", http.StatusBadRequest)
-			return
+		var val int64
+		if val, err = strconv.ParseInt(metricValue, 10, 64); err == nil {
+			err = h.Storage.IncrementCounter(r.Context(), metricName, val)
 		}
-		h.Storage.IncrementCounter(metricName, value)
 	case "gauge":
-		value, err := strconv.ParseFloat(metricValue, 64)
-		if err != nil {
-			http.Error(rw, "Bad request", http.StatusBadRequest)
-			return
+		var val float64
+		if val, err = strconv.ParseFloat(metricValue, 64); err == nil {
+			err = h.Storage.SetGauge(r.Context(), metricName, val)
 		}
-		h.Storage.SetGauge(metricName, value)
 	default:
 		http.Error(rw, "Bad request", http.StatusBadRequest)
+		return
+	}
+	if err != nil {
+		http.Error(rw, "internal error", http.StatusInternalServerError)
 		return
 	}
 	rw.WriteHeader(http.StatusOK)
@@ -90,31 +88,25 @@ func (h *Handler) GetHandler(rw http.ResponseWriter, r *http.Request) {
 
 	switch metricType {
 	case "gauge":
-		value, exists := h.Storage.GetGauge(metricName)
-		if !exists {
+		if value, ok := h.Storage.GetGauge(r.Context(), metricName); ok {
+			rw.Header().Set("Content-type", "text/plain")
+			_, _ = rw.Write([]byte(strconv.FormatFloat(value, 'f', -1, 64)))
+		} else {
 			http.Error(rw, "Metric not found", http.StatusNotFound)
-			return
 		}
-		rw.Header().Set("Content-type", "text/plain")
-		rw.Write([]byte(strconv.FormatFloat(value, 'f', -1, 64)))
 	case "counter":
-		value, exists := h.Storage.GetCounter(metricName)
-		if !exists {
+		if value, ok := h.Storage.GetCounter(r.Context(), metricName); ok {
+			rw.Header().Set("Content-type", "text/plain")
+			_, _ = rw.Write([]byte(strconv.FormatInt(value, 10)))
+		} else {
 			http.Error(rw, "Metric not found", http.StatusNotFound)
-			return
 		}
-		rw.Header().Set("Content-type", "text/plain")
-		rw.Write([]byte(strconv.FormatInt(value, 10)))
-	default:
-		http.Error(rw, "Invalid metric type", http.StatusBadRequest)
-		return
 	}
 }
 
 func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
-	var metric Metrics
-	err := json.NewDecoder(r.Body).Decode(&metric)
-	if err != nil {
+	var metric dto.Metrics
+	if err := json.NewDecoder(r.Body).Decode(&metric); err != nil {
 		http.Error(rw, "Bad request", http.StatusBadRequest)
 		return
 	}
@@ -125,17 +117,25 @@ func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 			http.Error(rw, "Missing value for gauge", http.StatusBadRequest)
 			return
 		}
-		h.Storage.SetGauge(metric.ID, *metric.Value)
-		value, _ := h.Storage.GetGauge(metric.ID)
-		metric.Value = &value
+		if err := h.Storage.SetGauge(r.Context(), metric.ID, *metric.Value); err != nil {
+			http.Error(rw, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if v, _ := h.Storage.GetGauge(r.Context(), metric.ID); true {
+			metric.Value = &v
+		}
 	case "counter":
 		if metric.Delta == nil {
 			http.Error(rw, "Missing delta for counter", http.StatusBadRequest)
 			return
 		}
-		h.Storage.IncrementCounter(metric.ID, *metric.Delta)
-		value, _ := h.Storage.GetCounter(metric.ID)
-		metric.Delta = &value
+		if err := h.Storage.IncrementCounter(r.Context(), metric.ID, *metric.Delta); err != nil {
+			http.Error(rw, "internal error", http.StatusInternalServerError)
+			return
+		}
+		if v, _ := h.Storage.GetCounter(r.Context(), metric.ID); true {
+			metric.Delta = &v
+		}
 	default:
 		http.Error(rw, "Invalid metric type", http.StatusBadRequest)
 		return
@@ -147,23 +147,22 @@ func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
-	var metric Metrics
-	err := json.NewDecoder(r.Body).Decode(&metric)
-	if err != nil {
+	var metric dto.Metrics
+	if err := json.NewDecoder(r.Body).Decode(&metric); err != nil {
 		http.Error(rw, "Bad request", http.StatusBadRequest)
 		return
 	}
 
 	switch metric.MType {
 	case "gauge":
-		value, exists := h.Storage.GetGauge(metric.ID)
+		value, exists := h.Storage.GetGauge(r.Context(), metric.ID)
 		if !exists {
 			http.Error(rw, "Metric not found", http.StatusNotFound)
 			return
 		}
 		metric.Value = &value
 	case "counter":
-		value, exists := h.Storage.GetCounter(metric.ID)
+		value, exists := h.Storage.GetCounter(r.Context(), metric.ID)
 		if !exists {
 			http.Error(rw, "Metric not found", http.StatusNotFound)
 			return
@@ -182,11 +181,18 @@ func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 func (h *Handler) UpdateMetrics(rw http.ResponseWriter, r *http.Request) {
 	var body []dto.Metrics
 	rw.Header().Set("Content-Type", "application/json")
-	err := json.NewDecoder(r.Body).Decode(&body)
-	if err != nil {
+
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(rw, err.Error(), http.StatusBadRequest)
 		return
 	}
-	h.Storage.SetMetrics(body)
+	// ограничим серверную обработку по времени
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+
+	if err := h.Storage.SetMetrics(ctx, body); err != nil {
+		http.Error(rw, "internal error", http.StatusInternalServerError)
+		return
+	}
 	rw.WriteHeader(http.StatusOK)
 }

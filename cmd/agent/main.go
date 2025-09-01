@@ -3,11 +3,17 @@ package main
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/rand"
+	"net"
 	"net/http"
+	"net/url"
+	"os/signal"
 	"runtime"
+	"syscall"
 	"time"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
@@ -20,23 +26,15 @@ type Metrics struct {
 	Value *float64 `json:"value,omitempty"`
 }
 
-type MetricsCollector struct {
-	pollCount int64
-}
+type MetricsCollector struct{ pollCount int64 }
 
-func NewMetricsCollector() *MetricsCollector {
-	return &MetricsCollector{pollCount: 0}
-}
-
-func (m *MetricsCollector) IncrementPollCount() {
-	m.pollCount++
-}
+func NewMetricsCollector() *MetricsCollector    { return &MetricsCollector{} }
+func (m *MetricsCollector) IncrementPollCount() { m.pollCount++ }
 
 func (m *MetricsCollector) Collect() map[string]float64 {
 	memStats := new(runtime.MemStats)
 	runtime.ReadMemStats(memStats)
-
-	metrics := map[string]float64{
+	return map[string]float64{
 		"Alloc":         float64(memStats.Alloc),
 		"BuckHashSys":   float64(memStats.BuckHashSys),
 		"Frees":         float64(memStats.Frees),
@@ -66,7 +64,6 @@ func (m *MetricsCollector) Collect() map[string]float64 {
 		"TotalAlloc":    float64(memStats.TotalAlloc),
 		"RandomValue":   rand.Float64() * 100,
 	}
-	return metrics
 }
 
 type MetricsSender struct {
@@ -77,16 +74,77 @@ type MetricsSender struct {
 func NewMetricsSender(serverAddress string) *MetricsSender {
 	return &MetricsSender{
 		serverAddress: serverAddress,
-		client:        &http.Client{},
+		client:        &http.Client{Timeout: 5 * time.Second},
 	}
 }
 
-func (s *MetricsSender) SendJSON(metric Metrics) error {
-	jsonData, err := json.Marshal(metric)
+// ———— RETRY CORE ————
+
+var backoffs = []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
+
+type httpStatusError int
+
+func (e httpStatusError) Error() string { return fmt.Sprintf("http status %d", int(e)) }
+
+func isRetryableHTTPOrNetErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	// сетевые/транспортные ошибки
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		// ContextCanceled — не ретраем; DeadlineExceeded — ретраем
+		if errors.Is(ue.Err, context.Canceled) {
+			return false
+		}
+		return true
+	}
+	var ne net.Error
+	if errors.As(err, &ne) {
+		return ne.Timeout()
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	// HTTP коды (заворачиваем в httpStatusError ниже)
+	var se httpStatusError
+	if errors.As(err, &se) {
+		switch int(se) {
+		case 408, 425, 429, 500, 502, 503, 504:
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
+func retryCtx(ctx context.Context, fn func() error, isRetryable func(error) bool) error {
+	attempts := len(backoffs) + 1
+	for i := 0; i < attempts; i++ {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		if !isRetryable(err) || i == len(backoffs) {
+			return err
+		}
+		select {
+		case <-time.After(backoffs[i]):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+// ———— HTTP helpers ————
+
+func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload any) error {
+	jsonData, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
-
 	var buf bytes.Buffer
 	gz := gzip.NewWriter(&buf)
 	if _, err := gz.Write(jsonData); err != nil {
@@ -96,8 +154,7 @@ func (s *MetricsSender) SendJSON(metric Metrics) error {
 		return err
 	}
 
-	url := fmt.Sprintf("http://%s/update", s.serverAddress)
-	req, err := http.NewRequest(http.MethodPost, url, &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://%s%s", s.serverAddress, path), &buf)
 	if err != nil {
 		return err
 	}
@@ -111,10 +168,40 @@ func (s *MetricsSender) SendJSON(metric Metrics) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server returned non-200 status: %d", resp.StatusCode)
+		return httpStatusError(resp.StatusCode)
+	}
+	return nil
+}
+
+// Старая одиночная отправка с контекстом + retry
+func (s *MetricsSender) SendJSONCtx(ctx context.Context, metric Metrics) error {
+	return retryCtx(ctx, func() error {
+		return s.postGzJSONCtx(ctx, "/update", metric)
+	}, isRetryableHTTPOrNetErr)
+}
+
+// Батч с фолбэком по одной
+func (s *MetricsSender) SendBatchJSONCtx(ctx context.Context, batch []Metrics) error {
+	if len(batch) == 0 {
+		return nil
+	}
+	// пробуем /updates/ c ретраями
+	err := retryCtx(ctx, func() error {
+		return s.postGzJSONCtx(ctx, "/updates/", batch)
+	}, isRetryableHTTPOrNetErr)
+	if err == nil {
+		return nil
 	}
 
-	return nil
+	// фолбэк: по одной (каждая с собственными ретраями) — не сбиваем весь батч из-за одной метрики
+	fmt.Printf("Batch send failed (%v), falling back to single sends...\n", err)
+	var firstErr error
+	for _, m := range batch {
+		if e := s.SendJSONCtx(ctx, m); e != nil && firstErr == nil {
+			firstErr = e
+		}
+	}
+	return firstErr
 }
 
 type Agent struct {
@@ -133,28 +220,42 @@ func NewAgent(pollInterval, reportInterval time.Duration, serverAddress string) 
 	}
 }
 
-func (a *Agent) start() {
-	ticker := time.NewTicker(a.pollInterval)
+func (a *Agent) Start(ctx context.Context) {
+	pollTicker := time.NewTicker(a.pollInterval)
 	reportTicker := time.NewTicker(a.reportInterval)
+	defer pollTicker.Stop()
+	defer reportTicker.Stop()
+
 	for {
 		select {
-		case <-ticker.C:
+		case <-ctx.Done():
+			fmt.Println("agent: shutdown")
+			return
+
+		case <-pollTicker.C:
 			a.collector.IncrementPollCount()
+
 		case <-reportTicker.C:
-			metrics := a.collector.Collect()
-			for name, value := range metrics {
+			collected := a.collector.Collect()
+			batch := make([]Metrics, 0, len(collected)+1)
+			for name, value := range collected {
 				val := value
-				err := a.sender.SendJSON(Metrics{ID: name, MType: "gauge", Value: &val})
-				if err != nil {
-					fmt.Printf("Error sending gauge %s: %v\n", name, err)
-				}
+				batch = append(batch, Metrics{ID: name, MType: "gauge", Value: &val})
 			}
 			delta := a.collector.pollCount
-			err := a.sender.SendJSON(Metrics{ID: "PollCount", MType: "counter", Delta: &delta})
+			batch = append(batch, Metrics{ID: "PollCount", MType: "counter", Delta: &delta})
+
+			// локальный deadline на отправку всего батча
+			sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			err := a.sender.SendBatchJSONCtx(sendCtx, batch)
+			cancel()
+
 			if err != nil {
-				fmt.Printf("Error sending counter PollCount: %v\n", err)
+				fmt.Printf("Error sending batch: %v\n", err)
+				// не обнуляем pollCount — доберём в следующем репорте
+			} else {
+				a.collector.pollCount = 0
 			}
-			a.collector.pollCount = 0
 		}
 	}
 }
@@ -162,11 +263,10 @@ func (a *Agent) start() {
 func main() {
 	cfg := config.ParseAgentFlags()
 
-	agent := NewAgent(
-		cfg.PollInterval,
-		cfg.ReportInterval,
-		cfg.ServerAddress,
-	)
+	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress)
 
-	agent.start()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	agent.Start(ctx)
 }

@@ -2,14 +2,16 @@ package handlers
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
-	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
+	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/interfaces"
+	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 )
@@ -51,7 +53,7 @@ func TestUpdateHandlerGaugeSuccess(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	value, exists := s.GetGauge("temperature")
+	value, exists := s.GetGauge(context.Background(), "temperature")
 	assert.True(t, exists)
 	assert.Equal(t, 23.5, value)
 }
@@ -70,7 +72,7 @@ func TestUpdateHandlerCounterSuccess(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	value, exists := s.GetCounter("hits")
+	value, exists := s.GetCounter(context.Background(), "hits")
 	assert.True(t, exists)
 	assert.Equal(t, int64(10), value)
 }
@@ -92,7 +94,7 @@ func TestUpdateHandlerInvalidMetricType(t *testing.T) {
 
 func TestGetHandlerGaugeSuccess(t *testing.T) {
 	s := newTestStore(t)
-	s.SetGauge("temperature", 23.5)
+	assert.NoError(t, s.SetGauge(context.Background(), "temperature", 23.5))
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Get("/value/{metricType}/{metricName}", h.GetHandler)
@@ -108,7 +110,7 @@ func TestGetHandlerGaugeSuccess(t *testing.T) {
 
 func TestGetHandlerCounterSuccess(t *testing.T) {
 	s := newTestStore(t)
-	s.IncrementCounter("hits", 10)
+	assert.NoError(t, s.IncrementCounter(context.Background(), "hits", 10))
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Get("/value/{metricType}/{metricName}", h.GetHandler)
@@ -138,8 +140,8 @@ func TestGetHandlerMetricNotFound(t *testing.T) {
 
 func TestHomeHandle(t *testing.T) {
 	s := newTestStore(t)
-	s.SetGauge("temperature", 23.5)
-	s.IncrementCounter("hits", 10)
+	assert.NoError(t, s.SetGauge(context.Background(), "temperature", 23.5))
+	assert.NoError(t, s.IncrementCounter(context.Background(), "hits", 10))
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Get("/", h.HomeHandler)
@@ -164,7 +166,7 @@ func TestUpdateHandlerJSON_GaugeSuccess(t *testing.T) {
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
 
-	metric := Metrics{ID: "temperature", MType: "gauge", Value: new(float64)}
+	metric := dto.Metrics{ID: "temperature", MType: "gauge", Value: new(float64)}
 	*metric.Value = 23.5
 	body, _ := json.Marshal(metric)
 
@@ -176,14 +178,14 @@ func TestUpdateHandlerJSON_GaugeSuccess(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	var response Metrics
+	var response dto.Metrics
 	err := json.Unmarshal(rr.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Equal(t, "temperature", response.ID)
 	assert.Equal(t, "gauge", response.MType)
 	assert.Equal(t, 23.5, *response.Value)
 
-	value, exists := s.GetGauge("temperature")
+	value, exists := s.GetGauge(context.Background(), "temperature")
 	assert.True(t, exists)
 	assert.Equal(t, 23.5, value)
 }
@@ -194,7 +196,7 @@ func TestUpdateHandlerJSON_CounterSuccess(t *testing.T) {
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
 
-	metric := Metrics{ID: "hits", MType: "counter", Delta: new(int64)}
+	metric := dto.Metrics{ID: "hits", MType: "counter", Delta: new(int64)}
 	*metric.Delta = 10
 	body, _ := json.Marshal(metric)
 
@@ -206,14 +208,14 @@ func TestUpdateHandlerJSON_CounterSuccess(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	var response Metrics
+	var response dto.Metrics
 	err := json.Unmarshal(rr.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Equal(t, "hits", response.ID)
 	assert.Equal(t, "counter", response.MType)
 	assert.Equal(t, int64(10), *response.Delta)
 
-	value, exists := s.GetCounter("hits")
+	value, exists := s.GetCounter(context.Background(), "hits")
 	assert.True(t, exists)
 	assert.Equal(t, int64(10), value)
 }
@@ -224,7 +226,7 @@ func TestUpdateHandlerJSON_InvalidType(t *testing.T) {
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
 
-	metric := Metrics{ID: "invalid", MType: "invalid", Value: new(float64)}
+	metric := dto.Metrics{ID: "invalid", MType: "invalid", Value: new(float64)}
 	*metric.Value = 1.0
 	body, _ := json.Marshal(metric)
 
@@ -243,7 +245,7 @@ func TestUpdateHandlerJSON_MissingValue(t *testing.T) {
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
 
-	metric := Metrics{ID: "temperature", MType: "gauge"}
+	metric := dto.Metrics{ID: "temperature", MType: "gauge"}
 	body, _ := json.Marshal(metric)
 
 	req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(body))
@@ -261,7 +263,7 @@ func TestUpdateHandlerJSON_MissingDelta(t *testing.T) {
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
 
-	metric := Metrics{ID: "hits", MType: "counter"}
+	metric := dto.Metrics{ID: "hits", MType: "counter"}
 	body, _ := json.Marshal(metric)
 
 	req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(body))
@@ -275,12 +277,12 @@ func TestUpdateHandlerJSON_MissingDelta(t *testing.T) {
 
 func TestValueHandlerJSON_GaugeSuccess(t *testing.T) {
 	s := newTestStore(t)
-	s.SetGauge("temperature", 23.5)
+	assert.NoError(t, s.SetGauge(context.Background(), "temperature", 23.5))
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/value", h.ValueHandlerJSON)
 
-	metric := Metrics{ID: "temperature", MType: "gauge"}
+	metric := dto.Metrics{ID: "temperature", MType: "gauge"}
 	body, _ := json.Marshal(metric)
 
 	req := httptest.NewRequest(http.MethodPost, "/value", bytes.NewReader(body))
@@ -291,7 +293,7 @@ func TestValueHandlerJSON_GaugeSuccess(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	var response Metrics
+	var response dto.Metrics
 	err := json.Unmarshal(rr.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Equal(t, "temperature", response.ID)
@@ -301,12 +303,12 @@ func TestValueHandlerJSON_GaugeSuccess(t *testing.T) {
 
 func TestValueHandlerJSON_CounterSuccess(t *testing.T) {
 	s := newTestStore(t)
-	s.IncrementCounter("hits", 10)
+	assert.NoError(t, s.IncrementCounter(context.Background(), "hits", 10))
 	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/value", h.ValueHandlerJSON)
 
-	metric := Metrics{ID: "hits", MType: "counter"}
+	metric := dto.Metrics{ID: "hits", MType: "counter"}
 	body, _ := json.Marshal(metric)
 
 	req := httptest.NewRequest(http.MethodPost, "/value", bytes.NewReader(body))
@@ -317,7 +319,7 @@ func TestValueHandlerJSON_CounterSuccess(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, rr.Code)
 
-	var response Metrics
+	var response dto.Metrics
 	err := json.Unmarshal(rr.Body.Bytes(), &response)
 	assert.NoError(t, err)
 	assert.Equal(t, "hits", response.ID)
@@ -331,7 +333,7 @@ func TestValueHandlerJSON_InvalidType(t *testing.T) {
 	router := chi.NewRouter()
 	router.Post("/value", h.ValueHandlerJSON)
 
-	metric := Metrics{ID: "invalid", MType: "invalid"}
+	metric := dto.Metrics{ID: "invalid", MType: "invalid"}
 	body, _ := json.Marshal(metric)
 
 	req := httptest.NewRequest(http.MethodPost, "/value", bytes.NewReader(body))
@@ -349,7 +351,7 @@ func TestValueHandlerJSON_MetricNotFound(t *testing.T) {
 	router := chi.NewRouter()
 	router.Post("/value", h.ValueHandlerJSON)
 
-	metric := Metrics{ID: "not_found", MType: "gauge"}
+	metric := dto.Metrics{ID: "not_found", MType: "gauge"}
 	body, _ := json.Marshal(metric)
 
 	req := httptest.NewRequest(http.MethodPost, "/value", bytes.NewReader(body))

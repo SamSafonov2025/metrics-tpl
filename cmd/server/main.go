@@ -2,14 +2,15 @@ package main
 
 import (
 	"context"
-	"github.com/SamSafonov2025/metrics-tpl/internal/router"
-	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
 	"net/http"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
+	"github.com/SamSafonov2025/metrics-tpl/internal/router"
+	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
 	"go.uber.org/zap"
 )
 
@@ -38,19 +39,16 @@ func main() {
 
 	go func() {
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.GetLogger().Fatal("Server failed to start",
-				zap.Error(err),
-			)
+			logger.GetLogger().Fatal("Server failed to start", zap.Error(err))
 		}
 	}()
 
 	<-ctx.Done()
 
 	logger.GetLogger().Info("Shutting down server...")
-	if err := server.Shutdown(context.Background()); err != nil {
-		logger.GetLogger().Fatal("Server forced to shutdown",
-			zap.Error(err),
-		)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		logger.GetLogger().Fatal("Server forced to shutdown", zap.Error(err))
 	}
-
 }
