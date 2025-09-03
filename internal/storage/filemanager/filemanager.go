@@ -1,6 +1,7 @@
 package filemanager
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -31,13 +32,15 @@ func (fm *FileManager) SaveData(storage StorageInterface) error {
 		return errors.New("filemanager: empty FilePath")
 	}
 
+	ctx := context.Background()
+
 	// собираем метрики из стораджа
 	var out []dto.Metrics
-	for k, v := range storage.GetAllCounters() {
+	for k, v := range storage.GetAllCounters(ctx) {
 		val := v
 		out = append(out, dto.Metrics{ID: k, MType: "counter", Delta: &val})
 	}
-	for k, v := range storage.GetAllGauges() {
+	for k, v := range storage.GetAllGauges(ctx) {
 		val := v
 		out = append(out, dto.Metrics{ID: k, MType: "gauge", Value: &val})
 	}
@@ -69,20 +72,22 @@ func (fm *FileManager) LoadData(storage StorageInterface) error {
 		return err
 	}
 
+	ctx := context.Background()
+
 	for _, m := range items {
 		switch m.MType {
 		case "gauge":
 			if m.Value == nil {
 				continue
 			}
-			storage.SetGauge(m.ID, *m.Value)
+			storage.SetGauge(ctx, m.ID, *m.Value)
 
 		case "counter":
 			if m.Delta == nil {
 				continue
 			}
 			want := *m.Delta
-			cur, ok := storage.GetCounter(m.ID)
+			cur, ok := storage.GetCounter(ctx, m.ID)
 			var inc int64
 			if ok {
 				inc = want - cur // доводим до абсолютного занчения
@@ -90,7 +95,7 @@ func (fm *FileManager) LoadData(storage StorageInterface) error {
 				inc = want
 			}
 			if inc != 0 {
-				storage.IncrementCounter(m.ID, inc)
+				storage.IncrementCounter(ctx, m.ID, inc)
 			}
 		}
 	}

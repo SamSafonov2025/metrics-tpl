@@ -2,11 +2,19 @@ package dbstorage
 
 import (
 	"context"
+	"errors"
+	"github.com/SamSafonov2025/metrics-tpl/internal/consts"
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
+	//"github.com/jackc/pgx/v5/pgconn"
 	"log"
+	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/jackc/pgconn"
+	"github.com/jackc/pgerrcode"
 )
 
 type DBStorage struct {
@@ -23,38 +31,40 @@ type Counter struct {
 	Value int64  `json:"value"`
 }
 
-func (db *DBStorage) SetGauge(metricName string, value float64) {
-	ctx := context.Background()
+func (db *DBStorage) SetGauge(ctx context.Context, metricName string, value float64) error {
+	//ctx := context.Background()
 	const q = `
 		INSERT INTO gauge (id, value)
 		VALUES ($1, $2)
 		ON CONFLICT (id) DO UPDATE SET value = EXCLUDED.value;
 	`
-	if _, err := db.Pool.Exec(ctx, q, metricName, value); err != nil {
-		log.Printf("SetGauge: failed to upsert %q=%v: %v", metricName, value, err)
-	}
+	return retryCtx(ctx, func(ctx context.Context) error {
+		_, err := db.Pool.Exec(ctx, q, metricName, value)
+		return err
+	})
 }
 
-func (db *DBStorage) IncrementCounter(metricName string, value int64) {
-	ctx := context.Background()
+func (db *DBStorage) IncrementCounter(ctx context.Context, metricName string, value int64) error {
+	//ctx := context.Background()
 	const q = `
 		INSERT INTO counter (id, value)
 		VALUES ($1, $2)
 		ON CONFLICT (id) DO UPDATE SET value = counter.value + EXCLUDED.value;
 	`
-	if _, err := db.Pool.Exec(ctx, q, metricName, value); err != nil {
-		log.Printf("IncrementCounter: failed to upsert %q by %v: %v", metricName, value, err)
-	}
+	return retryCtx(ctx, func(ctx context.Context) error {
+		_, err := db.Pool.Exec(ctx, q, metricName, value)
+		return err
+	})
 }
 
-func (db *DBStorage) GetGauge(metricName string) (float64, bool) {
-	ctx := context.Background()
+func (db *DBStorage) GetGauge(ctx context.Context, metricName string) (float64, bool) {
+	//ctx := context.Background()
 	const q = `SELECT value FROM gauge WHERE id = $1;`
 
 	var v float64
 	err := db.Pool.QueryRow(ctx, q, metricName).Scan(&v)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, false
 		}
 		log.Printf("GetGauge: query %q: %v", metricName, err)
@@ -63,14 +73,14 @@ func (db *DBStorage) GetGauge(metricName string) (float64, bool) {
 	return v, true
 }
 
-func (db *DBStorage) GetCounter(metricName string) (int64, bool) {
-	ctx := context.Background()
+func (db *DBStorage) GetCounter(ctx context.Context, metricName string) (int64, bool) {
+	//ctx := context.Background()
 	const q = `SELECT value FROM counter WHERE id = $1;`
 
 	var v int64
 	err := db.Pool.QueryRow(ctx, q, metricName).Scan(&v)
 	if err != nil {
-		if err == pgx.ErrNoRows {
+		if errors.Is(err, pgx.ErrNoRows) {
 			return 0, false
 		}
 		log.Printf("GetCounter: query %q: %v", metricName, err)
@@ -79,8 +89,8 @@ func (db *DBStorage) GetCounter(metricName string) (int64, bool) {
 	return v, true
 }
 
-func (db *DBStorage) GetAllGauges() map[string]float64 {
-	ctx := context.Background()
+func (db *DBStorage) GetAllGauges(ctx context.Context) map[string]float64 {
+	//ctx := context.Background()
 	const q = `SELECT id, value FROM gauge;`
 
 	rows, err := db.Pool.Query(ctx, q)
@@ -107,8 +117,8 @@ func (db *DBStorage) GetAllGauges() map[string]float64 {
 	return gauges
 }
 
-func (db *DBStorage) GetAllCounters() map[string]int64 {
-	ctx := context.Background()
+func (db *DBStorage) GetAllCounters(ctx context.Context) map[string]int64 {
+	//ctx := context.Background()
 	const q = `SELECT id, value FROM counter;`
 
 	rows, err := db.Pool.Query(ctx, q)
@@ -135,12 +145,11 @@ func (db *DBStorage) GetAllCounters() map[string]int64 {
 	return counters
 }
 
-// setMetrics — основная логика с контекстом и возвратом ошибки.
-func (db *DBStorage) SetMetrics(metrics []dto.Metrics) {
+func (db *DBStorage) SetMetrics(ctx context.Context, metrics []dto.Metrics) error {
 	tx, err := db.Pool.Begin(context.Background())
 	if err != nil {
 		log.Printf("Error starting transaction: %s", err)
-		return
+		return err
 	}
 	defer func() {
 		if err != nil {
@@ -151,21 +160,13 @@ func (db *DBStorage) SetMetrics(metrics []dto.Metrics) {
 	}()
 
 	for _, metric := range metrics {
-		if metric.MType == dto.MetricTypeGauge && metric.Value != nil {
-			q := `INSERT INTO gauge (id, value)
-					VALUES ($1, $2)
-					ON CONFLICT (id) DO UPDATE
-					SET value = excluded.value;`
-			_, err = tx.Exec(context.Background(), q, metric.ID, *metric.Value)
+		if metric.MType == consts.MetricTypeGauge && metric.Value != nil {
+			err = db.InsertOrUpdateGauge(ctx, metric.ID, *metric.Value)
 			if err != nil {
 				log.Printf("Error inserting gauge metric: %v", err)
 			}
-		} else if metric.MType == dto.MetricTypeCounter && metric.Delta != nil {
-			q := `INSERT INTO counter (id, value)
-    				VALUES ($1, $2)
-					ON CONFLICT (id) DO UPDATE
-					SET value = counter.value + excluded.value;`
-			_, err = tx.Exec(context.Background(), q, metric.ID, *metric.Delta)
+		} else if metric.MType == consts.MetricTypeCounter && metric.Delta != nil {
+			err = db.InsertOrUpdateCounter(ctx, metric.ID, *metric.Delta)
 			if err != nil {
 				log.Printf("Error inserting counter metric: %v", err)
 			}
@@ -173,12 +174,78 @@ func (db *DBStorage) SetMetrics(metrics []dto.Metrics) {
 			log.Printf("Unknown metric type or metric value is nil: %s, %s", metric.MType, metric.ID)
 		}
 	}
+
 	err = tx.Commit(context.Background())
 	if err != nil {
 		log.Fatalf("Unable to commit transaction: %v", err)
 	}
+
+	return nil
+}
+
+func (db *DBStorage) InsertOrUpdateGauge(ctx context.Context, metricID string, value float64) error {
+	q := `INSERT INTO gauge (id, value)
+			VALUES ($1, $2)
+			ON CONFLICT (id) DO UPDATE
+			SET value = excluded.value;`
+	_, err := db.Pool.Exec(ctx, q, metricID, value)
+	return err
+}
+
+func (db *DBStorage) InsertOrUpdateCounter(ctx context.Context, metricID string, delta int64) error {
+	q := `INSERT INTO counter (id, value)
+			VALUES ($1, $2)
+			ON CONFLICT (id) DO UPDATE
+			SET value = public.counter.value + excluded.value;`
+	_, err := db.Pool.Exec(ctx, q, metricID, delta)
+	return err
 }
 
 func (db *DBStorage) StorageType() string {
 	return "db"
+}
+
+// ------ retry policy ------
+var backoffs = []time.Duration{time.Second, 3 * time.Second, 5 * time.Second}
+
+func retryCtx(ctx context.Context, fn func(context.Context) error) error {
+	for i := 0; i < len(backoffs)+1; i++ {
+		err := fn(ctx)
+		if err == nil {
+			return nil
+		}
+		if !isRetryablePgErr(err) || i == len(backoffs) {
+			return err
+		}
+		select {
+		case <-time.After(backoffs[i]):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+func isRetryablePgErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) {
+		// ретраи только для Class 08 — Connection Exception
+		if strings.HasPrefix(pgErr.Code, "08") {
+			return true
+		}
+		// пример из задания: UniqueViolation — не ретраем
+		if pgErr.Code == pgerrcode.UniqueViolation {
+			return false
+		}
+	}
+	return false
 }
