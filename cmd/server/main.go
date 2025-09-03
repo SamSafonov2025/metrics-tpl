@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
+	"github.com/SamSafonov2025/metrics-tpl/internal/service"
 	"net/http"
 	"os/signal"
 	"syscall"
@@ -21,10 +23,11 @@ func main() {
 		panic(err)
 	}
 
-	s := storage.NewStorage(cfg)
-	defer storage.Close()
+	s := storage.NewStorage(cfg) // репозиторий (interfaces.Store)
+	svc := service.NewMetricsService(s, cfg.StoreInterval,
+		func(ctx context.Context) error { return postgres.Pool.Ping(ctx) })
 
-	r := router.New(s)
+	r := router.New(svc)
 
 	logger.GetLogger().Info("Server started",
 		zap.String("address", cfg.ServerAddress),

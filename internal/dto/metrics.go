@@ -6,8 +6,3 @@ type Metrics struct {
 	Delta *int64   `json:"delta,omitempty"` // counter (абсолютное значение)
 	Value *float64 `json:"value,omitempty"` // gauge
 }
-
-const (
-	MetricTypeCounter = "counter"
-	MetricTypeGauge   = "gauge"
-)

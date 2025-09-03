@@ -3,6 +3,7 @@ package dbstorage
 import (
 	"context"
 	"errors"
+	"github.com/SamSafonov2025/metrics-tpl/internal/consts"
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	//"github.com/jackc/pgx/v5/pgconn"
 	"log"
@@ -159,12 +160,12 @@ func (db *DBStorage) SetMetrics(ctx context.Context, metrics []dto.Metrics) erro
 	}()
 
 	for _, metric := range metrics {
-		if metric.MType == dto.MetricTypeGauge && metric.Value != nil {
+		if metric.MType == consts.MetricTypeGauge && metric.Value != nil {
 			err = db.InsertOrUpdateGauge(ctx, metric.ID, *metric.Value)
 			if err != nil {
 				log.Printf("Error inserting gauge metric: %v", err)
 			}
-		} else if metric.MType == dto.MetricTypeCounter && metric.Delta != nil {
+		} else if metric.MType == consts.MetricTypeCounter && metric.Delta != nil {
 			err = db.InsertOrUpdateCounter(ctx, metric.ID, *metric.Delta)
 			if err != nil {
 				log.Printf("Error inserting counter metric: %v", err)

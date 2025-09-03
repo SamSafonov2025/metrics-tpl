@@ -7,41 +7,44 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/interfaces"
+	"github.com/SamSafonov2025/metrics-tpl/internal/service"
 	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/assert"
 )
 
-// helper: выдаёт чистый сторадж на каждый тест
-func newTestStore(t *testing.T) interfaces.Store {
+// helper: создаёт чистый сторадж и handler с сервисом
+func newTestEnv(t *testing.T) (interfaces.Store, *Handler) {
 	t.Helper()
-	storage.TestReset() // сброс синглтона между тестами
+
+	// сбрасываем синглтон стораджа между тестами
+	storage.TestReset()
 
 	cfg := &config.ServerConfig{
-		StoreInterval:   5,
+		StoreInterval:   5 * time.Second,
 		FileStoragePath: "storage.json",
 		Restore:         false,
-		Database:        "", // без БД — используем memstorage
+		Database:        "", // без БД — memstorage
 	}
 
-	s := storage.NewStorage(cfg)
-
-	// на всякий случай корректно закрываем после теста
+	repo := storage.NewStorage(cfg)
+	// корректное закрытие после теста
 	t.Cleanup(func() {
 		storage.Close()
-		//storage.TestReset()
 	})
 
-	return s
+	svc := service.NewMetricsService(repo, 5*time.Second, nil) // ping не нужен в тестах
+	h := NewHandler(svc)
+	return repo, h
 }
 
 func TestUpdateHandlerGaugeSuccess(t *testing.T) {
-	s := newTestStore(t)
-	h := NewHandler(s)
+	s, h := newTestEnv(t)
 	router := chi.NewRouter()
 	router.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
 
@@ -59,8 +62,7 @@ func TestUpdateHandlerGaugeSuccess(t *testing.T) {
 }
 
 func TestUpdateHandlerCounterSuccess(t *testing.T) {
-	s := newTestStore(t)
-	h := NewHandler(s)
+	s, h := newTestEnv(t)
 	router := chi.NewRouter()
 	router.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
 
@@ -78,8 +80,7 @@ func TestUpdateHandlerCounterSuccess(t *testing.T) {
 }
 
 func TestUpdateHandlerInvalidMetricType(t *testing.T) {
-	s := newTestStore(t)
-	h := NewHandler(s)
+	_, h := newTestEnv(t)
 	router := chi.NewRouter()
 	router.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
 
@@ -93,9 +94,9 @@ func TestUpdateHandlerInvalidMetricType(t *testing.T) {
 }
 
 func TestGetHandlerGaugeSuccess(t *testing.T) {
-	s := newTestStore(t)
+	s, h := newTestEnv(t)
 	assert.NoError(t, s.SetGauge(context.Background(), "temperature", 23.5))
-	h := NewHandler(s)
+
 	router := chi.NewRouter()
 	router.Get("/value/{metricType}/{metricName}", h.GetHandler)
 
@@ -109,9 +110,9 @@ func TestGetHandlerGaugeSuccess(t *testing.T) {
 }
 
 func TestGetHandlerCounterSuccess(t *testing.T) {
-	s := newTestStore(t)
+	s, h := newTestEnv(t)
 	assert.NoError(t, s.IncrementCounter(context.Background(), "hits", 10))
-	h := NewHandler(s)
+
 	router := chi.NewRouter()
 	router.Get("/value/{metricType}/{metricName}", h.GetHandler)
 
@@ -125,8 +126,7 @@ func TestGetHandlerCounterSuccess(t *testing.T) {
 }
 
 func TestGetHandlerMetricNotFound(t *testing.T) {
-	s := newTestStore(t)
-	h := NewHandler(s)
+	_, h := newTestEnv(t)
 	router := chi.NewRouter()
 	router.Get("/value/{metricType}/{metricName}", h.GetHandler)
 
@@ -139,10 +139,10 @@ func TestGetHandlerMetricNotFound(t *testing.T) {
 }
 
 func TestHomeHandle(t *testing.T) {
-	s := newTestStore(t)
+	s, h := newTestEnv(t)
 	assert.NoError(t, s.SetGauge(context.Background(), "temperature", 23.5))
 	assert.NoError(t, s.IncrementCounter(context.Background(), "hits", 10))
-	h := NewHandler(s)
+
 	router := chi.NewRouter()
 	router.Get("/", h.HomeHandler)
 
@@ -161,8 +161,7 @@ func TestHomeHandle(t *testing.T) {
 }
 
 func TestUpdateHandlerJSON_GaugeSuccess(t *testing.T) {
-	s := newTestStore(t)
-	h := NewHandler(s)
+	s, h := newTestEnv(t)
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
 
@@ -191,8 +190,7 @@ func TestUpdateHandlerJSON_GaugeSuccess(t *testing.T) {
 }
 
 func TestUpdateHandlerJSON_CounterSuccess(t *testing.T) {
-	s := newTestStore(t)
-	h := NewHandler(s)
+	s, h := newTestEnv(t)
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
 
@@ -221,8 +219,7 @@ func TestUpdateHandlerJSON_CounterSuccess(t *testing.T) {
 }
 
 func TestUpdateHandlerJSON_InvalidType(t *testing.T) {
-	s := newTestStore(t)
-	h := NewHandler(s)
+	_, h := newTestEnv(t)
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
 
@@ -240,8 +237,7 @@ func TestUpdateHandlerJSON_InvalidType(t *testing.T) {
 }
 
 func TestUpdateHandlerJSON_MissingValue(t *testing.T) {
-	s := newTestStore(t)
-	h := NewHandler(s)
+	_, h := newTestEnv(t)
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
 
@@ -258,8 +254,7 @@ func TestUpdateHandlerJSON_MissingValue(t *testing.T) {
 }
 
 func TestUpdateHandlerJSON_MissingDelta(t *testing.T) {
-	s := newTestStore(t)
-	h := NewHandler(s)
+	_, h := newTestEnv(t)
 	router := chi.NewRouter()
 	router.Post("/update", h.UpdateHandlerJSON)
 
@@ -276,9 +271,8 @@ func TestUpdateHandlerJSON_MissingDelta(t *testing.T) {
 }
 
 func TestValueHandlerJSON_GaugeSuccess(t *testing.T) {
-	s := newTestStore(t)
+	s, h := newTestEnv(t)
 	assert.NoError(t, s.SetGauge(context.Background(), "temperature", 23.5))
-	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/value", h.ValueHandlerJSON)
 
@@ -302,9 +296,8 @@ func TestValueHandlerJSON_GaugeSuccess(t *testing.T) {
 }
 
 func TestValueHandlerJSON_CounterSuccess(t *testing.T) {
-	s := newTestStore(t)
+	s, h := newTestEnv(t)
 	assert.NoError(t, s.IncrementCounter(context.Background(), "hits", 10))
-	h := NewHandler(s)
 	router := chi.NewRouter()
 	router.Post("/value", h.ValueHandlerJSON)
 
@@ -328,8 +321,7 @@ func TestValueHandlerJSON_CounterSuccess(t *testing.T) {
 }
 
 func TestValueHandlerJSON_InvalidType(t *testing.T) {
-	s := newTestStore(t)
-	h := NewHandler(s)
+	_, h := newTestEnv(t)
 	router := chi.NewRouter()
 	router.Post("/value", h.ValueHandlerJSON)
 
@@ -346,8 +338,7 @@ func TestValueHandlerJSON_InvalidType(t *testing.T) {
 }
 
 func TestValueHandlerJSON_MetricNotFound(t *testing.T) {
-	s := newTestStore(t)
-	h := NewHandler(s)
+	_, h := newTestEnv(t)
 	router := chi.NewRouter()
 	router.Post("/value", h.ValueHandlerJSON)
 
