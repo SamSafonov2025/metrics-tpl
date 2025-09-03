@@ -28,7 +28,7 @@ func (h *Handler) Ping(rw http.ResponseWriter, r *http.Request) {
 func (h *Handler) HomeHandler(rw http.ResponseWriter, r *http.Request) {
 	gauges, counters, err := h.Svc.List(r.Context())
 	if err != nil {
-		http.Error(rw, "internal error", http.StatusInternalServerError)
+		http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -72,7 +72,7 @@ func (h *Handler) UpdateHandler(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := h.Svc.Update(r.Context(), m); err != nil {
-		http.Error(rw, "internal error", http.StatusInternalServerError)
+		http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	rw.WriteHeader(http.StatusOK)
@@ -92,7 +92,7 @@ func (h *Handler) GetHandler(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(rw, "internal error", http.StatusInternalServerError)
+		http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -117,7 +117,7 @@ func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(rw, "internal error", http.StatusInternalServerError)
+		http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -142,7 +142,7 @@ func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		http.Error(rw, "internal error", http.StatusInternalServerError)
+		http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
