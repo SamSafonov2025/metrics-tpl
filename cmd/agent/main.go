@@ -8,6 +8,8 @@ import (
 	"errors"
 	"fmt"
 	"github.com/SamSafonov2025/metrics-tpl/internal/crypto"
+	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
+	"go.uber.org/zap"
 	"io"
 	"math/rand"
 	"net"
@@ -355,7 +357,20 @@ func (s *MetricsSender) SendBatchJSON(batch []Metrics) error {
 func main() {
 	cfg := config.ParseAgentFlags()
 
-	fmt.Printf("agetn: CryptoKey (%s) !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", cfg.CryptoKey)
+	// инициализация логгера
+	if err := logger.Init(); err != nil {
+		panic(err)
+	}
+
+	// логируем все поля конфига
+	logger.GetLogger().Info("Agent config loaded &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&",
+		zap.String("server_address", cfg.ServerAddress),
+		zap.Duration("poll_interval", cfg.PollInterval),
+		zap.Duration("report_interval", cfg.ReportInterval),
+		zap.String("crypto_key", cfg.CryptoKey),
+	)
+
+	//fmt.Printf("agetn: CryptoKey (%s) !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", cfg.CryptoKey)
 
 	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress, cfg.CryptoKey)
 
