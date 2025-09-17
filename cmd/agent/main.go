@@ -355,6 +355,8 @@ func (s *MetricsSender) SendBatchJSON(batch []Metrics) error {
 func main() {
 	cfg := config.ParseAgentFlags()
 
+	fmt.Printf("agetn: CryptoKey (%s) !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", cfg.CryptoKey)
+
 	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress, cfg.CryptoKey)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

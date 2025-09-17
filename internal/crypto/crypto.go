@@ -4,9 +4,13 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt" // <— добавлено для форматирования сообщения об ошибке
+	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 )
 
 func GenerateHash(data []byte, key string) string {
@@ -27,8 +31,12 @@ func (c *Crypto) HashValidationMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
+		logger.GetLogger().Info("HMAC: CryptoKey !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", zapString("cryptoKey: ", c.Key))
+
 		bodyBytes, err := io.ReadAll(r.Body)
 		if err != nil {
+			// логирование ошибки чтения тела
+			logger.GetLogger().Warn("HMAC: unable to read request body", zapError(err))
 			http.Error(w, "Unable to read request body", http.StatusInternalServerError)
 			return
 		}
@@ -38,6 +46,11 @@ func (c *Crypto) HashValidationMiddleware(next http.Handler) http.Handler {
 
 		receivedHash := r.Header.Get("HashSHA256")
 		if receivedHash != expectedHash {
+			// логирование несовпадения хэша
+			logger.GetLogger().Warn(
+				"HMAC: invalid hash",
+				zapError(fmt.Errorf("received=%s expected=%s", receivedHash, expectedHash)),
+			)
 			http.Error(w, "Invalid hash", http.StatusBadRequest)
 			return
 		}
@@ -68,3 +81,8 @@ func (rw *responseHashWriter) WriteHeader(statusCode int) {
 	}
 	rw.ResponseWriter.WriteHeader(statusCode)
 }
+
+// маленьк
+// ие помощники, чтобы не тащить zap в каждое место
+func zapError(err error) zap.Field    { return zap.Error(err) }
+func zapString(k, v string) zap.Field { return zap.String(k, v) }
