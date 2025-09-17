@@ -204,7 +204,11 @@ func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload 
 
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
-	req.Header.Set("HashSHA256", hash)
+	// ❗️Подпись только если ключ задан
+	if s.cryptoKey != "" {
+		hash := crypto.GenerateHash(jsonData, s.cryptoKey) // подписываем ДЕГЗИПНУТОЕ json-тело
+		req.Header.Set("HashSHA256", hash)
+	}
 
 	// лог до запроса
 	const maxDump = 512
