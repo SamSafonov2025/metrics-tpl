@@ -6,31 +6,36 @@ import (
 
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/handlers"
 	"github.com/SamSafonov2025/metrics-tpl/internal/compressor"
+	"github.com/SamSafonov2025/metrics-tpl/internal/crypto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 )
 
 // New строит chi.Router и регистрирует все маршруты приложения.
-func New(svc service.MetricsService) *chi.Mux {
+func New(svc service.MetricsService, key string) *chi.Mux {
 	r := chi.NewRouter()
+
+	// порядок важен:
+	// 1) распаковка gzip (если есть)
 	r.Use(compressor.GzipMiddleware)
+	// 2) Глобальный логгер — увидит и 400 от HashValidationMiddleware
+	r.Use(logger.Middleware)
 
 	h := handlers.NewHandler(svc)
+	c := crypto.Crypto{Key: key}
 
-	r.Get("/", logger.HandlerLog(h.HomeHandler))
-	r.Post("/update/{metricType}/{metricName}/{metricValue}", logger.HandlerLog(h.UpdateHandler))
-	r.Get("/value/{metricType}/{metricName}", logger.HandlerLog(h.GetHandler))
+	// Можно убрать HandlerLog(...) здесь, чтобы не было дублей.
+	// Я оставлю чистые хендлеры; если хотите оставить старые — просто верните logger.HandlerLog(...)
+	r.With(c.HashValidationMiddleware).Post("/update", h.UpdateHandlerJSON)
+	r.With(c.HashValidationMiddleware).Post("/update/", h.UpdateHandlerJSON)
+	r.With(c.HashValidationMiddleware).Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
+	r.With(c.HashValidationMiddleware).Post("/updates", h.UpdateMetrics)
+	r.With(c.HashValidationMiddleware).Post("/updates/", h.UpdateMetrics)
+	r.With(c.HashValidationMiddleware).Post("/value", h.ValueHandlerJSON)
+	r.With(c.HashValidationMiddleware).Post("/value/", h.ValueHandlerJSON)
 
+	r.Get("/", h.HomeHandler)
+	r.Get("/value/{metricType}/{metricName}", h.GetHandler)
 	r.Get("/ping", h.Ping)
-
-	// JSON-роуты: поддерживаем и со слэшем, и без
-	r.Post("/update", logger.HandlerLog(h.UpdateHandlerJSON))
-	r.Post("/update/", logger.HandlerLog(h.UpdateHandlerJSON))
-	r.Post("/value", logger.HandlerLog(h.ValueHandlerJSON))
-	r.Post("/value/", logger.HandlerLog(h.ValueHandlerJSON))
-
-	// БАТЧ: тоже со слэшем и без + логгер
-	r.Post("/updates", logger.HandlerLog(h.UpdateMetrics))
-	r.Post("/updates/", logger.HandlerLog(h.UpdateMetrics))
 
 	return r
 }

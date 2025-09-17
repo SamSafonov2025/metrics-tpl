@@ -23,11 +23,21 @@ func main() {
 		panic(err)
 	}
 
+	// логируем все поля конфига
+	logger.GetLogger().Info("Server config loaded !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!",
+		zap.String("address", cfg.ServerAddress),
+		zap.Duration("store_interval", cfg.StoreInterval),
+		zap.String("file_storage_path", cfg.FileStoragePath),
+		zap.Bool("restore", cfg.Restore),
+		zap.String("database_dsn", cfg.Database),
+		zap.String("crypto_key", cfg.CryptoKey),
+	)
+
 	s := storage.NewStorage(cfg) // репозиторий (interfaces.Store)
 	svc := service.NewMetricsService(s, cfg.StoreInterval,
 		func(ctx context.Context) error { return postgres.Pool.Ping(ctx) })
 
-	r := router.New(svc)
+	r := router.New(svc, cfg.CryptoKey)
 
 	logger.GetLogger().Info("Server started",
 		zap.String("address", cfg.ServerAddress),

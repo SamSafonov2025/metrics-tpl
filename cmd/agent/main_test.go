@@ -39,10 +39,10 @@ func TestMetricsSender_SendJSON(t *testing.T) {
 
 		w.WriteHeader(http.StatusOK)
 	}))
-	
+
 	defer server.Close()
 
-	sender := NewMetricsSender(server.Listener.Addr().String())
+	sender := NewMetricsSender(server.Listener.Addr().String(), "123")
 
 	value := 42.5
 	metric := Metrics{ID: "testMetric", MType: "gauge", Value: &value}

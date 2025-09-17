@@ -7,12 +7,17 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/SamSafonov2025/metrics-tpl/internal/crypto"
+	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
+	"go.uber.org/zap"
+	"io"
 	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -69,12 +74,14 @@ func (m *MetricsCollector) Collect() map[string]float64 {
 type MetricsSender struct {
 	serverAddress string
 	client        *http.Client
+	cryptoKey     string
 }
 
-func NewMetricsSender(serverAddress string) *MetricsSender {
+func NewMetricsSender(serverAddress string, cryptoKey string) *MetricsSender {
 	return &MetricsSender{
 		serverAddress: serverAddress,
 		client:        &http.Client{Timeout: 5 * time.Second},
+		cryptoKey:     cryptoKey,
 	}
 }
 
@@ -124,18 +131,53 @@ func retryCtx(ctx context.Context, fn func() error, isRetryable func(error) bool
 	for i := 0; i < attempts; i++ {
 		err := fn()
 		if err == nil {
+			if i > 0 {
+				fmt.Printf("agent: retry succeeded on attempt %d/%d\n", i+1, attempts)
+			}
 			return nil
 		}
-		if !isRetryable(err) || i == len(backoffs) {
+		// логируем результат попытки
+		retry := isRetryable(err) && i < len(backoffs)
+		if retry {
+			fmt.Printf("agent: attempt %d/%d failed: %v — next retry in %s\n", i+1, attempts, err, backoffs[i])
+		} else {
+			fmt.Printf("agent: attempt %d/%d failed: %v — no more retries\n", i+1, attempts, err)
 			return err
 		}
 		select {
 		case <-time.After(backoffs[i]):
 		case <-ctx.Done():
+			fmt.Println("agent: retry aborted by context:", ctx.Err())
 			return ctx.Err()
 		}
 	}
 	return nil
+}
+
+// ———— helpers ————
+
+func shortStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "...(truncated)"
+}
+
+func shortBytes(b []byte, n int) string {
+	if len(b) <= n {
+		return string(b)
+	}
+	return string(b[:n]) + "...(truncated)"
+}
+
+func maskHash(h string) string {
+	if h == "" {
+		return ""
+	}
+	if len(h) <= 10 {
+		return h
+	}
+	return h[:10] + "…"
 }
 
 // ———— HTTP helpers ————
@@ -154,18 +196,45 @@ func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload 
 		return err
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://%s%s", s.serverAddress, path), &buf)
+	urlStr := fmt.Sprintf("http://%s%s", s.serverAddress, path)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, &buf)
 	if err != nil {
 		return err
 	}
+
+	hash := crypto.GenerateHash(jsonData, s.cryptoKey)
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
+	// ❗️Подпись только если ключ задан
+	if s.cryptoKey != "" {
+		hash := crypto.GenerateHash(jsonData, s.cryptoKey) // подписываем ДЕГЗИПНУТОЕ json-тело
+		req.Header.Set("HashSHA256", hash)
+	}
 
+	// лог до запроса
+	const maxDump = 512
+	fmt.Printf(
+		"agent: POST %s | json=%dB gz=%dB | hash=%s | headers={Content-Type:%s, Content-Encoding:%s}\njson_preview=%s\n",
+		urlStr, len(jsonData), buf.Len(), maskHash(hash),
+		req.Header.Get("Content-Type"), req.Header.Get("Content-Encoding"),
+		shortBytes(jsonData, maxDump),
+	)
+
+	start := time.Now()
 	resp, err := s.client.Do(req)
+	dur := time.Since(start)
 	if err != nil {
+		fmt.Printf("agent: request error (%s) after %s: %v\n", path, dur, err)
 		return err
 	}
 	defer resp.Body.Close()
+
+	// читаем кусок ответа (полезно при 400 от middleware)
+	body, _ := io.ReadAll(io.LimitReader(resp.Body, int64(maxDump)))
+	bodyStr := strings.TrimSpace(string(body))
+
+	fmt.Printf("agent: response %s -> %d in %s | resp_preview=%s\n", path, resp.StatusCode, dur, shortStr(bodyStr, maxDump))
 
 	if resp.StatusCode != http.StatusOK {
 		return httpStatusError(resp.StatusCode)
@@ -185,20 +254,26 @@ func (s *MetricsSender) SendBatchJSONCtx(ctx context.Context, batch []Metrics) e
 	if len(batch) == 0 {
 		return nil
 	}
+	fmt.Printf("agent: sending batch (%d metrics) -> /updates/\n", len(batch))
+
 	// пробуем /updates/ c ретраями
 	err := retryCtx(ctx, func() error {
 		return s.postGzJSONCtx(ctx, "/updates/", batch)
 	}, isRetryableHTTPOrNetErr)
 	if err == nil {
+		fmt.Println("agent: batch sent successfully")
 		return nil
 	}
 
 	// фолбэк: по одной (каждая с собственными ретраями) — не сбиваем весь батч из-за одной метрики
-	fmt.Printf("Batch send failed (%v), falling back to single sends...\n", err)
+	fmt.Printf("agent: batch send failed (%v), falling back to single sends...\n", err)
 	var firstErr error
-	for _, m := range batch {
-		if e := s.SendJSONCtx(ctx, m); e != nil && firstErr == nil {
-			firstErr = e
+	for i, m := range batch {
+		if e := s.SendJSONCtx(ctx, m); e != nil {
+			fmt.Printf("agent: single send failed for #%d (%s/%s): %v\n", i, m.MType, m.ID, e)
+			if firstErr == nil {
+				firstErr = e
+			}
 		}
 	}
 	return firstErr
@@ -211,12 +286,12 @@ type Agent struct {
 	sender         *MetricsSender
 }
 
-func NewAgent(pollInterval, reportInterval time.Duration, serverAddress string) *Agent {
+func NewAgent(pollInterval, reportInterval time.Duration, serverAddress string, cryptoKey string) *Agent {
 	return &Agent{
 		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
 		collector:      NewMetricsCollector(),
-		sender:         NewMetricsSender(serverAddress),
+		sender:         NewMetricsSender(serverAddress, cryptoKey),
 	}
 }
 
@@ -225,6 +300,9 @@ func (a *Agent) Start(ctx context.Context) {
 	reportTicker := time.NewTicker(a.reportInterval)
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
+
+	fmt.Printf("agent: started | poll=%s report=%s | server=%s | hmac=%t\n",
+		a.pollInterval, a.reportInterval, a.sender.serverAddress, a.sender.cryptoKey != "")
 
 	for {
 		select {
@@ -245,13 +323,16 @@ func (a *Agent) Start(ctx context.Context) {
 			delta := a.collector.pollCount
 			batch = append(batch, Metrics{ID: "PollCount", MType: "counter", Delta: &delta})
 
+			// немного телеметрии перед отправкой
+			fmt.Printf("agent: report tick | gauges=%d counters=1 pollCount=%d\n", len(collected), delta)
+
 			// локальный deadline на отправку всего батча
 			sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			err := a.sender.SendBatchJSONCtx(sendCtx, batch)
 			cancel()
 
 			if err != nil {
-				fmt.Printf("Error sending batch: %v\n", err)
+				fmt.Printf("agent: error sending batch: %v\n", err)
 				// не обнуляем pollCount — доберём в следующем репорте
 			} else {
 				a.collector.pollCount = 0
@@ -276,7 +357,22 @@ func (s *MetricsSender) SendBatchJSON(batch []Metrics) error {
 func main() {
 	cfg := config.ParseAgentFlags()
 
-	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress)
+	// инициализация логгера
+	if err := logger.Init(); err != nil {
+		panic(err)
+	}
+
+	// логируем все поля конфига
+	logger.GetLogger().Info("Agent config loaded &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&",
+		zap.String("server_address", cfg.ServerAddress),
+		zap.Duration("poll_interval", cfg.PollInterval),
+		zap.Duration("report_interval", cfg.ReportInterval),
+		zap.String("crypto_key", cfg.CryptoKey),
+	)
+
+	//fmt.Printf("agetn: CryptoKey (%s) !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", cfg.CryptoKey)
+
+	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress, cfg.CryptoKey)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
