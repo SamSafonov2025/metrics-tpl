@@ -13,21 +13,28 @@ import (
 // New строит chi.Router и регистрирует все маршруты приложения.
 func New(svc service.MetricsService, key string) *chi.Mux {
 	r := chi.NewRouter()
+
+	// порядок важен:
+	// 1) распаковка gzip (если есть)
 	r.Use(compressor.GzipMiddleware)
+	// 2) Глобальный логгер — увидит и 400 от HashValidationMiddleware
+	r.Use(logger.Middleware)
 
 	h := handlers.NewHandler(svc)
 	c := crypto.Crypto{Key: key}
 
-	r.With(c.HashValidationMiddleware).Post("/update", logger.HandlerLog(h.UpdateHandlerJSON))
-	r.With(c.HashValidationMiddleware).Post("/update/", logger.HandlerLog(h.UpdateHandlerJSON))
-	r.With(c.HashValidationMiddleware).Post("/update/{metricType}/{metricName}/{metricValue}", logger.HandlerLog(h.UpdateHandler))
-	r.With(c.HashValidationMiddleware).Post("/updates", logger.HandlerLog(h.UpdateMetrics))
-	r.With(c.HashValidationMiddleware).Post("/updates/", logger.HandlerLog(h.UpdateMetrics))
-	r.With(c.HashValidationMiddleware).Post("/value", logger.HandlerLog(h.ValueHandlerJSON))
-	r.With(c.HashValidationMiddleware).Post("/value/", logger.HandlerLog(h.ValueHandlerJSON))
+	// Можно убрать HandlerLog(...) здесь, чтобы не было дублей.
+	// Я оставлю чистые хендлеры; если хотите оставить старые — просто верните logger.HandlerLog(...)
+	r.With(c.HashValidationMiddleware).Post("/update", h.UpdateHandlerJSON)
+	r.With(c.HashValidationMiddleware).Post("/update/", h.UpdateHandlerJSON)
+	r.With(c.HashValidationMiddleware).Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
+	r.With(c.HashValidationMiddleware).Post("/updates", h.UpdateMetrics)
+	r.With(c.HashValidationMiddleware).Post("/updates/", h.UpdateMetrics)
+	r.With(c.HashValidationMiddleware).Post("/value", h.ValueHandlerJSON)
+	r.With(c.HashValidationMiddleware).Post("/value/", h.ValueHandlerJSON)
 
-	r.Get("/", logger.HandlerLog(h.HomeHandler))
-	r.Get("/value/{metricType}/{metricName}", logger.HandlerLog(h.GetHandler))
+	r.Get("/", h.HomeHandler)
+	r.Get("/value/{metricType}/{metricName}", h.GetHandler)
 	r.Get("/ping", h.Ping)
 
 	return r
