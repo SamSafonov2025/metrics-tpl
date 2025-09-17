@@ -8,14 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"github.com/SamSafonov2025/metrics-tpl/internal/crypto"
-	"io"
 	"math/rand"
 	"net"
 	"net/http"
 	"net/url"
 	"os/signal"
 	"runtime"
-	"strings"
 	"syscall"
 	"time"
 
@@ -129,53 +127,18 @@ func retryCtx(ctx context.Context, fn func() error, isRetryable func(error) bool
 	for i := 0; i < attempts; i++ {
 		err := fn()
 		if err == nil {
-			if i > 0 {
-				fmt.Printf("agent: retry succeeded on attempt %d/%d\n", i+1, attempts)
-			}
 			return nil
 		}
-		// логируем результат попытки
-		retry := isRetryable(err) && i < len(backoffs)
-		if retry {
-			fmt.Printf("agent: attempt %d/%d failed: %v — next retry in %s\n", i+1, attempts, err, backoffs[i])
-		} else {
-			fmt.Printf("agent: attempt %d/%d failed: %v — no more retries\n", i+1, attempts, err)
+		if !isRetryable(err) || i == len(backoffs) {
 			return err
 		}
 		select {
 		case <-time.After(backoffs[i]):
 		case <-ctx.Done():
-			fmt.Println("agent: retry aborted by context:", ctx.Err())
 			return ctx.Err()
 		}
 	}
 	return nil
-}
-
-// ———— helpers ————
-
-func shortStr(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "...(truncated)"
-}
-
-func shortBytes(b []byte, n int) string {
-	if len(b) <= n {
-		return string(b)
-	}
-	return string(b[:n]) + "...(truncated)"
-}
-
-func maskHash(h string) string {
-	if h == "" {
-		return ""
-	}
-	if len(h) <= 10 {
-		return h
-	}
-	return h[:10] + "…"
 }
 
 // ———— HTTP helpers ————
@@ -194,8 +157,7 @@ func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload 
 		return err
 	}
 
-	urlStr := fmt.Sprintf("http://%s%s", s.serverAddress, path)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("http://%s%s", s.serverAddress, path), &buf)
 	if err != nil {
 		return err
 	}
@@ -206,29 +168,11 @@ func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload 
 	req.Header.Set("Content-Encoding", "gzip")
 	req.Header.Set("HashSHA256", hash)
 
-	// лог до запроса
-	const maxDump = 512
-	fmt.Printf(
-		"agent: POST %s | json=%dB gz=%dB | hash=%s | headers={Content-Type:%s, Content-Encoding:%s}\njson_preview=%s\n",
-		urlStr, len(jsonData), buf.Len(), maskHash(hash),
-		req.Header.Get("Content-Type"), req.Header.Get("Content-Encoding"),
-		shortBytes(jsonData, maxDump),
-	)
-
-	start := time.Now()
 	resp, err := s.client.Do(req)
-	dur := time.Since(start)
 	if err != nil {
-		fmt.Printf("agent: request error (%s) after %s: %v\n", path, dur, err)
 		return err
 	}
 	defer resp.Body.Close()
-
-	// читаем кусок ответа (полезно при 400 от middleware)
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, int64(maxDump)))
-	bodyStr := strings.TrimSpace(string(body))
-
-	fmt.Printf("agent: response %s -> %d in %s | resp_preview=%s\n", path, resp.StatusCode, dur, shortStr(bodyStr, maxDump))
 
 	if resp.StatusCode != http.StatusOK {
 		return httpStatusError(resp.StatusCode)
@@ -248,26 +192,20 @@ func (s *MetricsSender) SendBatchJSONCtx(ctx context.Context, batch []Metrics) e
 	if len(batch) == 0 {
 		return nil
 	}
-	fmt.Printf("agent: sending batch (%d metrics) -> /updates/\n", len(batch))
-
 	// пробуем /updates/ c ретраями
 	err := retryCtx(ctx, func() error {
 		return s.postGzJSONCtx(ctx, "/updates/", batch)
 	}, isRetryableHTTPOrNetErr)
 	if err == nil {
-		fmt.Println("agent: batch sent successfully")
 		return nil
 	}
 
 	// фолбэк: по одной (каждая с собственными ретраями) — не сбиваем весь батч из-за одной метрики
-	fmt.Printf("agent: batch send failed (%v), falling back to single sends...\n", err)
+	fmt.Printf("Batch send failed (%v), falling back to single sends...\n", err)
 	var firstErr error
-	for i, m := range batch {
-		if e := s.SendJSONCtx(ctx, m); e != nil {
-			fmt.Printf("agent: single send failed for #%d (%s/%s): %v\n", i, m.MType, m.ID, e)
-			if firstErr == nil {
-				firstErr = e
-			}
+	for _, m := range batch {
+		if e := s.SendJSONCtx(ctx, m); e != nil && firstErr == nil {
+			firstErr = e
 		}
 	}
 	return firstErr
@@ -295,9 +233,6 @@ func (a *Agent) Start(ctx context.Context) {
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
-	fmt.Printf("agent: started | poll=%s report=%s | server=%s | hmac=%t\n",
-		a.pollInterval, a.reportInterval, a.sender.serverAddress, a.sender.cryptoKey != "")
-
 	for {
 		select {
 		case <-ctx.Done():
@@ -317,16 +252,13 @@ func (a *Agent) Start(ctx context.Context) {
 			delta := a.collector.pollCount
 			batch = append(batch, Metrics{ID: "PollCount", MType: "counter", Delta: &delta})
 
-			// немного телеметрии перед отправкой
-			fmt.Printf("agent: report tick | gauges=%d counters=1 pollCount=%d\n", len(collected), delta)
-
 			// локальный deadline на отправку всего батча
 			sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 			err := a.sender.SendBatchJSONCtx(sendCtx, batch)
 			cancel()
 
 			if err != nil {
-				fmt.Printf("agent: error sending batch: %v\n", err)
+				fmt.Printf("Error sending batch: %v\n", err)
 				// не обнуляем pollCount — доберём в следующем репорте
 			} else {
 				a.collector.pollCount = 0
