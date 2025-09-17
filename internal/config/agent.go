@@ -22,7 +22,7 @@ func ParseAgentFlags() *AgentConfig {
 	addr := getEnv("ADDRESS", "localhost:8080")
 	poll := atoiEnv("POLL_INTERVAL", 2)
 	report := atoiEnv("REPORT_INTERVAL", 10)
-	сryptoKey := getEnv("KEY", "123")
+	сryptoKey := getEnv("KEY", "")
 
 	flag.StringVar(&cfg.ServerAddress, "a", addr, "HTTP server endpoint address")
 	flag.IntVar(&pollSeconds, "p", poll, "Poll interval in seconds")
