@@ -27,7 +27,7 @@ func main() {
 	svc := service.NewMetricsService(s, cfg.StoreInterval,
 		func(ctx context.Context) error { return postgres.Pool.Ping(ctx) })
 
-	r := router.New(svc)
+	r := router.New(svc, cfg.CryptoKey)
 
 	logger.GetLogger().Info("Server started",
 		zap.String("address", cfg.ServerAddress),

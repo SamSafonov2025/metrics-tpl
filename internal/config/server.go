@@ -13,6 +13,7 @@ type ServerConfig struct {
 	FileStoragePath string
 	Restore         bool
 	Database        string
+	CryptoKey       string
 }
 
 func ParseServerFlags() *ServerConfig {
@@ -24,18 +25,18 @@ func ParseServerFlags() *ServerConfig {
 	path := getEnv("FILE_STORAGE_PATH", "/tmp/metrics-db.json")
 	restore := boolEnv("RESTORE", false)
 	database := getEnv("DATABASE_DSN", "postgresql://postgres:arzamas17@localhost:5432/yandex_go?sslmode=disable&search_path=public")
+	сryptoKey := getEnv("KEY", "123")
 
 	flag.StringVar(&cfg.ServerAddress, "a", addr, "HTTP server endpoint address")
 	flag.IntVar(&storeSeconds, "i", store, "Store interval in seconds (0 = sync mode)")
-	flag.StringVar(&path, "f", path, "File storage path")
-	flag.BoolVar(&restore, "r", restore, "Restore metrics from file")
-	flag.StringVar(&database, "d", database, "Database connection string")
+	flag.StringVar(&cfg.FileStoragePath, "f", path, "File storage path")
+	flag.BoolVar(&cfg.Restore, "r", restore, "Restore metrics from file")
+	flag.StringVar(&cfg.Database, "d", database, "Database connection string")
+	flag.StringVar(&cfg.CryptoKey, "k", сryptoKey, "Key for hash calculation")
+
 	flag.Parse()
 
 	cfg.StoreInterval = time.Duration(storeSeconds) * time.Second
-	cfg.FileStoragePath = path
-	cfg.Restore = restore
-	cfg.Database = database
 	return cfg
 }
 

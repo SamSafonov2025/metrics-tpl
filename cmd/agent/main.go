@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/SamSafonov2025/metrics-tpl/internal/crypto"
 	"math/rand"
 	"net"
 	"net/http"
@@ -69,12 +70,14 @@ func (m *MetricsCollector) Collect() map[string]float64 {
 type MetricsSender struct {
 	serverAddress string
 	client        *http.Client
+	cryptoKey     string
 }
 
-func NewMetricsSender(serverAddress string) *MetricsSender {
+func NewMetricsSender(serverAddress string, cryptoKey string) *MetricsSender {
 	return &MetricsSender{
 		serverAddress: serverAddress,
 		client:        &http.Client{Timeout: 5 * time.Second},
+		cryptoKey:     cryptoKey,
 	}
 }
 
@@ -158,8 +161,12 @@ func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload 
 	if err != nil {
 		return err
 	}
+
+	hash := crypto.GenerateHash(jsonData, s.cryptoKey)
+
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("HashSHA256", hash)
 
 	resp, err := s.client.Do(req)
 	if err != nil {
@@ -211,12 +218,12 @@ type Agent struct {
 	sender         *MetricsSender
 }
 
-func NewAgent(pollInterval, reportInterval time.Duration, serverAddress string) *Agent {
+func NewAgent(pollInterval, reportInterval time.Duration, serverAddress string, cryptoKey string) *Agent {
 	return &Agent{
 		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
 		collector:      NewMetricsCollector(),
-		sender:         NewMetricsSender(serverAddress),
+		sender:         NewMetricsSender(serverAddress, cryptoKey),
 	}
 }
 
@@ -276,7 +283,7 @@ func (s *MetricsSender) SendBatchJSON(batch []Metrics) error {
 func main() {
 	cfg := config.ParseAgentFlags()
 
-	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress)
+	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress, cfg.CryptoKey)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
