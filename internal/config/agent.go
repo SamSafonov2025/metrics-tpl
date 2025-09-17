@@ -2,6 +2,7 @@ package config
 
 import (
 	"flag"
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -24,11 +25,15 @@ func ParseAgentFlags() *AgentConfig {
 	report := atoiEnv("REPORT_INTERVAL", 10)
 	key := getEnv("KEY", "")
 
+	fmt.Printf("AGENT: key (%s) !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", key)
+
 	flag.StringVar(&cfg.ServerAddress, "a", addr, "HTTP server endpoint address")
 	flag.IntVar(&pollSeconds, "p", poll, "Poll interval in seconds")
 	flag.IntVar(&reportSeconds, "r", report, "Report interval in seconds")
 	flag.StringVar(&cfg.CryptoKey, "k", key, "Key for hash calculation")
 	flag.Parse()
+
+	fmt.Printf("AGENT: cfg.CryptoKey (%s) !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", cfg.CryptoKey)
 
 	cfg.PollInterval = time.Duration(pollSeconds) * time.Second
 	cfg.ReportInterval = time.Duration(reportSeconds) * time.Second
