@@ -3,6 +3,7 @@ package main
 import (
 	"compress/gzip"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -10,36 +11,42 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestMetricsSender_SendJSON(t *testing.T) {
+func TestMetricsSender_SendBatchJSON(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		assert.Equal(t, "/update", r.URL.Path, "Expected path /update")
+		// маршрут и метод
+		assert.Equal(t, "/updates/", r.URL.Path, "Expected path /updates/")
 		assert.Equal(t, http.MethodPost, r.Method, "Expected POST method")
-		contentType := r.Header.Get("Content-Type")
-		assert.Equal(t, "application/json", contentType, "Expected Content-Type: application/json")
 
-		contentEncoding := r.Header.Get("Content-Encoding")
-		assert.Equal(t, "gzip", contentEncoding, "Expected Content-Encoding: gzip")
+		// заголовки
+		assert.Equal(t, "application/json", r.Header.Get("Content-Type"))
+		assert.Equal(t, "gzip", r.Header.Get("Content-Encoding"))
 
-		gzipReader, err := gzip.NewReader(r.Body)
-		if err != nil {
-			t.Fatalf("Failed to create gzip reader: %v", err)
+		// подпись передаётся, если ключ задан
+		hash := r.Header.Get("HashSHA256")
+		assert.NotEmpty(t, hash, "HashSHA256 header should be set")
+
+		// распакуем тело
+		gr, err := gzip.NewReader(r.Body)
+		assert.NoError(t, err, "Failed to create gzip reader")
+		defer gr.Close()
+		raw, err := io.ReadAll(gr)
+		assert.NoError(t, err, "Failed to read gzipped body")
+
+		// это батч (массив) метрик
+		var batch []Metrics
+		err = json.Unmarshal(raw, &batch)
+		assert.NoError(t, err, "Failed to decode JSON array")
+		assert.Len(t, batch, 1, "Expected single metric in batch")
+
+		metric := batch[0]
+		assert.Equal(t, "testMetric", metric.ID)
+		assert.Equal(t, "gauge", metric.MType)
+		if assert.NotNil(t, metric.Value) {
+			assert.Equal(t, 42.5, *metric.Value)
 		}
-		defer gzipReader.Close()
-
-		var metric Metrics
-		err = json.NewDecoder(gzipReader).Decode(&metric)
-		if err != nil {
-			t.Fatalf("Failed to decode JSON: %v", err)
-		}
-
-		assert.Equal(t, "testMetric", metric.ID, "Expected metric ID 'testMetric'")
-		assert.Equal(t, "gauge", metric.MType, "Expected metric type 'gauge'")
-		assert.NotNil(t, metric.Value, "Value should not be nil")
-		assert.Equal(t, 42.5, *metric.Value, "Expected value 42.5")
 
 		w.WriteHeader(http.StatusOK)
 	}))
-
 	defer server.Close()
 
 	sender := NewMetricsSender(server.Listener.Addr().String(), "123")
@@ -47,6 +54,6 @@ func TestMetricsSender_SendJSON(t *testing.T) {
 	value := 42.5
 	metric := Metrics{ID: "testMetric", MType: "gauge", Value: &value}
 
-	err := sender.SendJSON(metric)
+	err := sender.SendBatchJSON([]Metrics{metric})
 	assert.NoError(t, err, "Sending should not produce error")
 }
