@@ -129,12 +129,11 @@ func isRetryableHTTPOrNetErr(err error) bool {
 	if err == nil {
 		return false
 	}
+	// сетевые/транспортные ошибки
 	var ue *url.Error
 	if errors.As(err, &ue) {
-		if errors.Is(ue.Err, context.Canceled) {
-			return false
-		}
-		return true
+		// ContextCanceled — не ретраем; всё остальное — ретраем
+		return !errors.Is(ue.Err, context.Canceled)
 	}
 	var ne net.Error
 	if errors.As(err, &ne) {
@@ -154,6 +153,7 @@ func isRetryableHTTPOrNetErr(err error) bool {
 	}
 	return false
 }
+
 func retryCtx(ctx context.Context, fn func() error, isRetryable func(error) bool) error {
 	attempts := len(backoffs) + 1
 	for i := 0; i < attempts; i++ {
