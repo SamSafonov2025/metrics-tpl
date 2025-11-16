@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"github.com/SamSafonov2025/metrics-tpl/internal/audit"
 	"github.com/SamSafonov2025/metrics-tpl/internal/consts"
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
@@ -11,13 +12,17 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type Handler struct {
-	Svc service.MetricsService
+	Svc            service.MetricsService
+	AuditPublisher *audit.AuditPublisher
 }
 
-func NewHandler(svc service.MetricsService) *Handler { return &Handler{Svc: svc} }
+func NewHandler(svc service.MetricsService, auditPublisher *audit.AuditPublisher) *Handler {
+	return &Handler{Svc: svc, AuditPublisher: auditPublisher}
+}
 
 func (h *Handler) Ping(rw http.ResponseWriter, r *http.Request) {
 	if err := h.Svc.Ping(r.Context()); err != nil {
@@ -83,6 +88,8 @@ func (h *Handler) UpdateHandler(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	// Отправляем событие аудита после успешной обработки
+	h.sendAuditEvent(r, []string{m.ID})
 	rw.WriteHeader(http.StatusOK)
 }
 
@@ -135,6 +142,9 @@ func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Отправляем событие аудита после успешной обработки
+	h.sendAuditEvent(r, []string{m.ID})
+
 	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(rw).Encode(m)
@@ -186,10 +196,54 @@ func (h *Handler) UpdateMetrics(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+
+	// Отправляем событие аудита после успешной обработки
+	metricNames := make([]string, len(body))
+	for i, m := range body {
+		metricNames[i] = m.ID
+	}
+	h.sendAuditEvent(r, metricNames)
+
 	rw.WriteHeader(http.StatusOK)
 }
 
-// маленьк
-// ие помощники, чтобы не тащить zap в каждое место
+// маленькие помощники, чтобы не тащить zap в каждое место
 func zapError(err error) zap.Field    { return zap.Error(err) }
 func zapString(k, v string) zap.Field { return zap.String(k, v) }
+
+// getClientIP извлекает IP адрес клиента из запроса
+func getClientIP(r *http.Request) string {
+	// Пробуем получить IP из заголовков прокси
+	ip := r.Header.Get("X-Real-IP")
+	if ip == "" {
+		ip = r.Header.Get("X-Forwarded-For")
+		if ip != "" {
+			// X-Forwarded-For может содержать список IP, берем первый
+			if idx := strings.Index(ip, ","); idx != -1 {
+				ip = ip[:idx]
+			}
+		}
+	}
+	// Если заголовков нет, берем из RemoteAddr
+	if ip == "" {
+		ip = r.RemoteAddr
+		// RemoteAddr может содержать порт, убираем его
+		if idx := strings.LastIndex(ip, ":"); idx != -1 {
+			ip = ip[:idx]
+		}
+	}
+	return strings.TrimSpace(ip)
+}
+
+// sendAuditEvent отправляет событие аудита
+func (h *Handler) sendAuditEvent(r *http.Request, metricNames []string) {
+	if h.AuditPublisher == nil {
+		return
+	}
+	event := audit.AuditEvent{
+		Timestamp: time.Now().Unix(),
+		Metrics:   metricNames,
+		IPAddress: getClientIP(r),
+	}
+	h.AuditPublisher.NotifyAll(event)
+}
