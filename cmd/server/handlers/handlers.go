@@ -42,13 +42,22 @@ func (h *Handler) HomeHandler(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	var sb strings.Builder
+	// Предаллокируем память для улучшения производительности
+	sb.Grow(len(gauges)*50 + len(counters)*50 + 50)
+
 	sb.WriteString("<h4>Gauges</h4>")
 	for name, v := range gauges {
-		sb.WriteString(name + ": " + strconv.FormatFloat(v, 'f', -1, 64) + "</br>")
+		sb.WriteString(name)
+		sb.WriteString(": ")
+		sb.WriteString(strconv.FormatFloat(v, 'f', -1, 64))
+		sb.WriteString("</br>")
 	}
 	sb.WriteString("<h4>Counters</h4>")
 	for name, v := range counters {
-		sb.WriteString(name + ": " + strconv.FormatInt(v, 10) + "</br>")
+		sb.WriteString(name)
+		sb.WriteString(": ")
+		sb.WriteString(strconv.FormatInt(v, 10))
+		sb.WriteString("</br>")
 	}
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(http.StatusOK)

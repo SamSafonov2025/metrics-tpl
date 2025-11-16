@@ -53,21 +53,25 @@ func (s *MemStorage) GetGauge(_ context.Context, name string) (float64, bool) {
 
 func (s *MemStorage) GetAllCounters(_ context.Context) map[string]int64 {
 	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Предварительная аллокация с точным размером
 	result := make(map[string]int64, len(s.Counters))
 	for k, v := range s.Counters {
 		result[k] = int64(v)
 	}
-	s.mu.RUnlock()
 	return result
 }
 
 func (s *MemStorage) GetAllGauges(_ context.Context) map[string]float64 {
 	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	// Предварительная аллокация с точным размером
 	result := make(map[string]float64, len(s.Gauges))
 	for k, v := range s.Gauges {
 		result[k] = float64(v)
 	}
-	s.mu.RUnlock()
 	return result
 }
 
