@@ -1,4 +1,4 @@
-// internal/service/metrics.go
+// Package service содержит бизнес-логику для работы с метриками.
 package service
 
 import (
@@ -10,18 +10,47 @@ import (
 	"github.com/SamSafonov2025/metrics-tpl/internal/interfaces"
 )
 
+// Стандартные ошибки сервиса метрик
 var (
+	// ErrInvalidType возвращается при указании неподдерживаемого типа метрики.
+	// Поддерживаемые типы: "gauge" и "counter".
 	ErrInvalidType = errors.New("invalid metric type")
-	ErrNotFound    = errors.New("metric not found")
-	ErrBadValue    = errors.New("bad metric value")
+
+	// ErrNotFound возвращается при попытке получить несуществующую метрику.
+	ErrNotFound = errors.New("metric not found")
+
+	// ErrBadValue возвращается при некорректном значении метрики.
+	// Например, nil значение для gauge или counter.
+	ErrBadValue = errors.New("bad metric value")
 )
 
+// MetricsService определяет интерфейс сервиса для работы с метриками.
+// Предоставляет методы для обновления, получения и управления метриками.
+//
+// Все методы принимают context.Context для управления временем выполнения
+// и поддержки отмены операций.
 type MetricsService interface {
+	// Ping проверяет доступность хранилища данных.
+	// Возвращает ошибку, если хранилище недоступно.
 	Ping(ctx context.Context) error
+
+	// List возвращает все gauge и counter метрики.
+	// Возвращает два map: первый для gauge, второй для counter метрик.
 	List(ctx context.Context) (gauges map[string]float64, counters map[string]int64, err error)
-	Update(ctx context.Context, m dto.Metrics) (dto.Metrics, error) // одиночная операция
-	Get(ctx context.Context, typ, id string) (dto.Metrics, error)   // чтение одной метрики
-	UpdateBatch(ctx context.Context, items []dto.Metrics) error     // батч/транзакция
+
+	// Update обновляет одну метрику.
+	// Для counter выполняет инкремент, для gauge устанавливает новое значение.
+	// Возвращает обновленную метрику с актуальным значением.
+	Update(ctx context.Context, m dto.Metrics) (dto.Metrics, error)
+
+	// Get возвращает метрику по типу и имени.
+	// Возвращает ErrNotFound, если метрика не существует.
+	// Возвращает ErrInvalidType, если тип метрики некорректен.
+	Get(ctx context.Context, typ, id string) (dto.Metrics, error)
+
+	// UpdateBatch атомарно обновляет несколько метрик.
+	// Все метрики должны быть валидными, иначе операция отменяется целиком.
+	UpdateBatch(ctx context.Context, items []dto.Metrics) error
 }
 
 type metricsService struct {
