@@ -1,3 +1,7 @@
+// Package handlers содержит HTTP-обработчики для сервера метрик.
+//
+// Пакет предоставляет набор хендлеров для работы с метриками через REST API:
+// обновление метрик, получение значений, массовые операции и проверку состояния БД.
 package handlers
 
 import (
@@ -17,15 +21,23 @@ import (
 	"github.com/SamSafonov2025/metrics-tpl/internal/service"
 )
 
+// Handler содержит зависимости для обработки HTTP-запросов метрик.
+// Включает сервисный слой для работы с метриками и издателя событий аудита.
 type Handler struct {
 	Svc            service.MetricsService
 	AuditPublisher *audit.AuditPublisher
 }
 
+// NewHandler создает новый экземпляр Handler с заданным сервисом и издателем аудита.
+// Параметр auditPublisher может быть nil, если аудит не требуется.
 func NewHandler(svc service.MetricsService, auditPublisher *audit.AuditPublisher) *Handler {
 	return &Handler{Svc: svc, AuditPublisher: auditPublisher}
 }
 
+// Ping проверяет доступность базы данных.
+// Возвращает HTTP 200 при успешном подключении или HTTP 500 при ошибке.
+//
+// Endpoint: GET /ping
 func (h *Handler) Ping(rw http.ResponseWriter, r *http.Request) {
 	if err := h.Svc.Ping(r.Context()); err != nil {
 		logger.GetLogger().Warn("Ping failed", zapError(err))
@@ -35,6 +47,10 @@ func (h *Handler) Ping(rw http.ResponseWriter, r *http.Request) {
 	rw.WriteHeader(http.StatusOK)
 }
 
+// HomeHandler возвращает HTML-страницу со списком всех метрик.
+// Отображает gauge и counter метрики в виде форматированного списка.
+//
+// Endpoint: GET /
 func (h *Handler) HomeHandler(rw http.ResponseWriter, r *http.Request) {
 	gauges, counters, err := h.Svc.List(r.Context())
 	if err != nil {
@@ -66,6 +82,16 @@ func (h *Handler) HomeHandler(rw http.ResponseWriter, r *http.Request) {
 	_, _ = rw.Write([]byte(sb.String()))
 }
 
+// UpdateHandler обновляет метрику через URL-параметры (устаревший формат).
+// Принимает тип метрики, имя и значение из URL.
+// Поддерживает типы "gauge" (float64) и "counter" (int64).
+//
+// Endpoint: POST /update/{metricType}/{metricName}/{metricValue}
+//
+// Возвращает:
+//   - HTTP 200 при успешном обновлении
+//   - HTTP 400 при некорректных параметрах
+//   - HTTP 500 при внутренней ошибке
 func (h *Handler) UpdateHandler(rw http.ResponseWriter, r *http.Request) {
 	m := dto.Metrics{
 		ID:    chi.URLParam(r, "metricName"),
@@ -104,6 +130,16 @@ func (h *Handler) UpdateHandler(rw http.ResponseWriter, r *http.Request) {
 	rw.WriteHeader(http.StatusOK)
 }
 
+// GetHandler возвращает значение метрики в текстовом формате.
+// Принимает тип метрики и имя из URL-параметров.
+//
+// Endpoint: GET /value/{metricType}/{metricName}
+//
+// Возвращает:
+//   - HTTP 200 и значение метрики в теле ответа
+//   - HTTP 400 при некорректном типе метрики
+//   - HTTP 404 если метрика не найдена
+//   - HTTP 500 при внутренней ошибке
 func (h *Handler) GetHandler(rw http.ResponseWriter, r *http.Request) {
 	typ := chi.URLParam(r, "metricType")
 	id := chi.URLParam(r, "metricName")
@@ -134,6 +170,20 @@ func (h *Handler) GetHandler(rw http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// UpdateHandlerJSON обновляет метрику в формате JSON.
+// Принимает метрику в теле запроса и возвращает обновленные данные.
+//
+// Endpoint: POST /update/
+//
+// Формат тела запроса:
+//
+//	{"id":"metricName","type":"gauge","value":123.45}
+//	{"id":"metricName","type":"counter","delta":10}
+//
+// Возвращает:
+//   - HTTP 200 и обновленную метрику в JSON
+//   - HTTP 400 при некорректных данных
+//   - HTTP 500 при внутренней ошибке
 func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	var m dto.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
@@ -161,6 +211,21 @@ func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(rw).Encode(m)
 }
 
+// ValueHandlerJSON возвращает значение метрики в формате JSON.
+// Принимает запрос с типом и именем метрики в теле запроса.
+//
+// Endpoint: POST /value/
+//
+// Формат тела запроса:
+//
+//	{"id":"metricName","type":"gauge"}
+//	{"id":"metricName","type":"counter"}
+//
+// Возвращает:
+//   - HTTP 200 и метрику в JSON с её текущим значением
+//   - HTTP 400 при некорректном типе метрики
+//   - HTTP 404 если метрика не найдена
+//   - HTTP 500 при внутренней ошибке
 func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	var req dto.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -190,6 +255,22 @@ func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(rw).Encode(m)
 }
 
+// UpdateMetrics обновляет несколько метрик одним запросом.
+// Принимает массив метрик в теле запроса и обрабатывает их атомарно.
+//
+// Endpoint: POST /updates/
+//
+// Формат тела запроса:
+//
+//	[
+//	  {"id":"metric1","type":"gauge","value":123.45},
+//	  {"id":"metric2","type":"counter","delta":10}
+//	]
+//
+// Возвращает:
+//   - HTTP 200 при успешном обновлении всех метрик
+//   - HTTP 400 при некорректных данных в любой из метрик
+//   - HTTP 500 при внутренней ошибке
 func (h *Handler) UpdateMetrics(rw http.ResponseWriter, r *http.Request) {
 	var body []dto.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
