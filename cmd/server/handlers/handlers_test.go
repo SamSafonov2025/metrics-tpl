@@ -39,7 +39,7 @@ func newTestEnv(t *testing.T) (interfaces.Store, *Handler) {
 	})
 
 	svc := service.NewMetricsService(repo, 5*time.Second, nil) // ping не нужен в тестах
-	h := NewHandler(svc)
+	h := NewHandler(svc, nil)                                  // auditPublisher не нужен в тестах
 	return repo, h
 }
 

@@ -14,6 +14,8 @@ type ServerConfig struct {
 	Restore         bool
 	Database        string
 	CryptoKey       string
+	AuditFile       string // путь к файлу для логов аудита
+	AuditURL        string // URL для отправки логов аудита
 }
 
 func ParseServerFlags() *ServerConfig {
@@ -30,6 +32,8 @@ func ParseServerFlags() *ServerConfig {
 		"Database connection string",
 	)
 	flag.StringVar(&cfg.CryptoKey, "k", "", "Key for hash calculation")
+	flag.StringVar(&cfg.AuditFile, "audit-file", "", "Audit log file path")
+	flag.StringVar(&cfg.AuditURL, "audit-url", "", "Audit log URL endpoint")
 
 	flag.Parse()
 
@@ -55,6 +59,12 @@ func ParseServerFlags() *ServerConfig {
 	}
 	if v := os.Getenv("KEY"); v != "" {
 		cfg.CryptoKey = v
+	}
+	if v := os.Getenv("AUDIT_FILE"); v != "" {
+		cfg.AuditFile = v
+	}
+	if v := os.Getenv("AUDIT_URL"); v != "" {
+		cfg.AuditURL = v
 	}
 
 	// 3) Производные поля
