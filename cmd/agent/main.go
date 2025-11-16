@@ -1,3 +1,4 @@
+// cmd/agent/main.go
 package main
 
 import (
@@ -22,6 +23,10 @@ import (
 	"time"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
+
+	// NEW: gopsutil
+	"github.com/shirou/gopsutil/cpu"
+	"github.com/shirou/gopsutil/mem"
 )
 
 type Metrics struct {
@@ -36,7 +41,7 @@ type MetricsCollector struct{ pollCount int64 }
 func NewMetricsCollector() *MetricsCollector    { return &MetricsCollector{} }
 func (m *MetricsCollector) IncrementPollCount() { m.pollCount++ }
 
-func (m *MetricsCollector) Collect() map[string]float64 {
+func (m *MetricsCollector) CollectRuntime() map[string]float64 {
 	memStats := new(runtime.MemStats)
 	runtime.ReadMemStats(memStats)
 	return map[string]float64{
@@ -71,6 +76,35 @@ func (m *MetricsCollector) Collect() map[string]float64 {
 	}
 }
 
+// ---- NEW: системные метрики через gopsutil
+func CollectSystemGauges() []Metrics {
+	var out []Metrics
+
+	vm, err := mem.VirtualMemory()
+	if err == nil {
+		tm := float64(vm.Total)
+		fm := float64(vm.Free)
+		out = append(out,
+			Metrics{ID: "TotalMemory", MType: "gauge", Value: &tm},
+			Metrics{ID: "FreeMemory", MType: "gauge", Value: &fm},
+		)
+	}
+
+	// per-CPU загрузка; длина среза == числу CPU на хосте в рантайме
+	// cpu.Percent(0,true) — мгновенный срез с момента предыдущего вызова
+	if per, err := cpu.Percent(0, true); err == nil {
+		for i, v := range per {
+			val := v
+			out = append(out, Metrics{
+				ID:    fmt.Sprintf("CPUutilization%d", i+1),
+				MType: "gauge",
+				Value: &val,
+			})
+		}
+	}
+	return out
+}
+
 type MetricsSender struct {
 	serverAddress string
 	client        *http.Client
@@ -86,13 +120,11 @@ func NewMetricsSender(serverAddress string, cryptoKey string) *MetricsSender {
 }
 
 // ———— RETRY CORE ————
-
 var backoffs = []time.Duration{1 * time.Second, 3 * time.Second, 5 * time.Second}
 
 type httpStatusError int
 
 func (e httpStatusError) Error() string { return fmt.Sprintf("http status %d", int(e)) }
-
 func isRetryableHTTPOrNetErr(err error) bool {
 	if err == nil {
 		return false
@@ -100,11 +132,8 @@ func isRetryableHTTPOrNetErr(err error) bool {
 	// сетевые/транспортные ошибки
 	var ue *url.Error
 	if errors.As(err, &ue) {
-		// ContextCanceled — не ретраем; DeadlineExceeded — ретраем
-		if errors.Is(ue.Err, context.Canceled) {
-			return false
-		}
-		return true
+		// ContextCanceled — не ретраем; всё остальное — ретраем
+		return !errors.Is(ue.Err, context.Canceled)
 	}
 	var ne net.Error
 	if errors.As(err, &ne) {
@@ -113,7 +142,6 @@ func isRetryableHTTPOrNetErr(err error) bool {
 	if errors.Is(err, context.DeadlineExceeded) {
 		return true
 	}
-	// HTTP коды (заворачиваем в httpStatusError ниже)
 	var se httpStatusError
 	if errors.As(err, &se) {
 		switch int(se) {
@@ -136,52 +164,24 @@ func retryCtx(ctx context.Context, fn func() error, isRetryable func(error) bool
 			}
 			return nil
 		}
-		// логируем результат попытки
 		retry := isRetryable(err) && i < len(backoffs)
 		if retry {
-			fmt.Printf("agent: attempt %d/%d failed: %v — next retry in %s\n", i+1, attempts, err, backoffs[i])
+			fmt.Printf("agent: attempt %d/%d failed: %v — next in %s\n", i+1, attempts, err, backoffs[i])
 		} else {
-			fmt.Printf("agent: attempt %d/%d failed: %v — no more retries\n", i+1, attempts, err)
+			fmt.Printf("agent: attempt %d/%d failed: %v — stop\n", i+1, attempts, err)
 			return err
 		}
 		select {
 		case <-time.After(backoffs[i]):
 		case <-ctx.Done():
-			fmt.Println("agent: retry aborted by context:", ctx.Err())
+			fmt.Println("agent: retry aborted:", ctx.Err())
 			return ctx.Err()
 		}
 	}
 	return nil
 }
 
-// ———— helpers ————
-
-func shortStr(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "...(truncated)"
-}
-
-func shortBytes(b []byte, n int) string {
-	if len(b) <= n {
-		return string(b)
-	}
-	return string(b[:n]) + "...(truncated)"
-}
-
-func maskHash(h string) string {
-	if h == "" {
-		return ""
-	}
-	if len(h) <= 10 {
-		return h
-	}
-	return h[:10] + "…"
-}
-
 // ———— HTTP helpers ————
-
 func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload any) error {
 	jsonData, err := json.Marshal(payload)
 	if err != nil {
@@ -203,23 +203,15 @@ func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload 
 	}
 
 	hash := crypto.GenerateHash(jsonData, s.cryptoKey)
-
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
-	// ❗️Подпись только если ключ задан
 	if s.cryptoKey != "" {
-		hash := crypto.GenerateHash(jsonData, s.cryptoKey) // подписываем ДЕГЗИПНУТОЕ json-тело
-		req.Header.Set("HashSHA256", hash)
+		req.Header.Set("HashSHA256", hash) // подписываем ДЕГЗИПНУТОЕ json-тело
 	}
 
-	// лог до запроса
 	const maxDump = 512
-	fmt.Printf(
-		"agent: POST %s | json=%dB gz=%dB | hash=%s | headers={Content-Type:%s, Content-Encoding:%s}\njson_preview=%s\n",
-		urlStr, len(jsonData), buf.Len(), maskHash(hash),
-		req.Header.Get("Content-Type"), req.Header.Get("Content-Encoding"),
-		shortBytes(jsonData, maxDump),
-	)
+	fmt.Printf("agent: POST %s | json=%dB gz=%dB | hash=%s\n",
+		urlStr, len(jsonData), buf.Len(), maskHash(hash))
 
 	start := time.Now()
 	resp, err := s.client.Do(req)
@@ -229,12 +221,9 @@ func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload 
 		return err
 	}
 	defer resp.Body.Close()
-
-	// читаем кусок ответа (полезно при 400 от middleware)
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, int64(maxDump)))
-	bodyStr := strings.TrimSpace(string(body))
-
-	fmt.Printf("agent: response %s -> %d in %s | resp_preview=%s\n", path, resp.StatusCode, dur, shortStr(bodyStr, maxDump))
+	fmt.Printf("agent: response %s -> %d in %s | preview=%s\n",
+		path, resp.StatusCode, dur, shortStr(strings.TrimSpace(string(body)), maxDump))
 
 	if resp.StatusCode != http.StatusOK {
 		return httpStatusError(resp.StatusCode)
@@ -242,137 +231,181 @@ func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload 
 	return nil
 }
 
-// Старая одиночная отправка с контекстом + retry
-func (s *MetricsSender) SendJSONCtx(ctx context.Context, metric Metrics) error {
-	return retryCtx(ctx, func() error {
-		return s.postGzJSONCtx(ctx, "/update", metric)
-	}, isRetryableHTTPOrNetErr)
-}
-
-// Батч с фолбэком по одной
 func (s *MetricsSender) SendBatchJSONCtx(ctx context.Context, batch []Metrics) error {
 	if len(batch) == 0 {
 		return nil
 	}
 	fmt.Printf("agent: sending batch (%d metrics) -> /updates/\n", len(batch))
-
-	// пробуем /updates/ c ретраями
-	err := retryCtx(ctx, func() error {
-		return s.postGzJSONCtx(ctx, "/updates/", batch)
-	}, isRetryableHTTPOrNetErr)
+	err := retryCtx(ctx, func() error { return s.postGzJSONCtx(ctx, "/updates/", batch) }, isRetryableHTTPOrNetErr)
 	if err == nil {
 		fmt.Println("agent: batch sent successfully")
 		return nil
 	}
-
-	// фолбэк: по одной (каждая с собственными ретраями) — не сбиваем весь батч из-за одной метрики
-	fmt.Printf("agent: batch send failed (%v), falling back to single sends...\n", err)
+	// fallback: по одной
+	fmt.Printf("agent: batch send failed (%v), fallback to singles...\n", err)
 	var firstErr error
 	for i, m := range batch {
-		if e := s.SendJSONCtx(ctx, m); e != nil {
+		e := retryCtx(ctx, func() error { return s.postGzJSONCtx(ctx, "/update", m) }, isRetryableHTTPOrNetErr)
+		if e != nil && firstErr == nil {
+			firstErr = e
+		}
+		if e != nil {
 			fmt.Printf("agent: single send failed for #%d (%s/%s): %v\n", i, m.MType, m.ID, e)
-			if firstErr == nil {
-				firstErr = e
-			}
 		}
 	}
 	return firstErr
 }
 
+// ———— Agent c worker pool ————
 type Agent struct {
 	pollInterval   time.Duration
 	reportInterval time.Duration
 	collector      *MetricsCollector
 	sender         *MetricsSender
+
+	rateLimit int
+	jobs      chan []Metrics
 }
 
-func NewAgent(pollInterval, reportInterval time.Duration, serverAddress string, cryptoKey string) *Agent {
+func NewAgent(pollInterval, reportInterval time.Duration, serverAddress, cryptoKey string, rateLimit int) *Agent {
+	if rateLimit < 1 {
+		rateLimit = 1
+	}
 	return &Agent{
 		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
 		collector:      NewMetricsCollector(),
 		sender:         NewMetricsSender(serverAddress, cryptoKey),
+		rateLimit:      rateLimit,
+		// небольшой буфер, чтобы сбор не стопорился при кратковременных всплесках
+		jobs: make(chan []Metrics, rateLimit*2),
 	}
 }
 
 func (a *Agent) Start(ctx context.Context) {
+	// отдельные горутины: (1) runtime-sampler, (2) runtime-reporter, (3) system-collector, (4) воркеры отправки
 	pollTicker := time.NewTicker(a.pollInterval)
 	reportTicker := time.NewTicker(a.reportInterval)
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
-	fmt.Printf("agent: started | poll=%s report=%s | server=%s | hmac=%t\n",
-		a.pollInterval, a.reportInterval, a.sender.serverAddress, a.sender.cryptoKey != "")
+	fmt.Printf("agent: started | poll=%s report=%s | server=%s | hmac=%t | workers=%d\n",
+		a.pollInterval, a.reportInterval, a.sender.serverAddress, a.sender.cryptoKey != "", a.rateLimit)
 
-	for {
-		select {
-		case <-ctx.Done():
-			fmt.Println("agent: shutdown")
-			return
-
-		case <-pollTicker.C:
-			a.collector.IncrementPollCount()
-
-		case <-reportTicker.C:
-			collected := a.collector.Collect()
-			batch := make([]Metrics, 0, len(collected)+1)
-			for name, value := range collected {
-				val := value
-				batch = append(batch, Metrics{ID: name, MType: "gauge", Value: &val})
+	// (4) стартуем пул отправителей
+	for i := 0; i < a.rateLimit; i++ {
+		go func(id int) {
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case batch := <-a.jobs:
+					sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+					_ = a.sender.SendBatchJSONCtx(sendCtx, batch)
+					cancel()
+				}
 			}
-			delta := a.collector.pollCount
-			batch = append(batch, Metrics{ID: "PollCount", MType: "counter", Delta: &delta})
+		}(i + 1)
+	}
 
-			// немного телеметрии перед отправкой
-			fmt.Printf("agent: report tick | gauges=%d counters=1 pollCount=%d\n", len(collected), delta)
+	// (1) инкрементируем pollCount по pollInterval
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-pollTicker.C:
+				a.collector.IncrementPollCount()
+			}
+		}
+	}()
 
-			// локальный deadline на отправку всего батча
-			sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-			err := a.sender.SendBatchJSONCtx(sendCtx, batch)
-			cancel()
+	// (2) каждые reportInterval — формируем батч из runtime + PollCount и кладём в очередь
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-reportTicker.C:
+				collected := a.collector.CollectRuntime()
+				batch := make([]Metrics, 0, len(collected)+1)
+				for name, value := range collected {
+					val := value
+					batch = append(batch, Metrics{ID: name, MType: "gauge", Value: &val})
+				}
+				delta := a.collector.pollCount
+				batch = append(batch, Metrics{ID: "PollCount", MType: "counter", Delta: &delta})
 
-			if err != nil {
-				fmt.Printf("agent: error sending batch: %v\n", err)
-				// не обнуляем pollCount — доберём в следующем репорте
-			} else {
+				fmt.Printf("agent: enqueue runtime report | gauges=%d counters=1 pollCount=%d\n", len(collected), delta)
+				a.jobs <- batch
+				// сбрасываем pollCount только ПОСЛЕ постановки в очередь
 				a.collector.pollCount = 0
 			}
 		}
-	}
+	}()
+
+	// (3) системные метрики с тем же pollInterval (можно сделать отдельный интервал, если нужно)
+	go func() {
+		sysTicker := time.NewTicker(a.pollInterval)
+		defer sysTicker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-sysTicker.C:
+				sysMetrics := CollectSystemGauges()
+				if len(sysMetrics) > 0 {
+					fmt.Printf("agent: enqueue system gauges | n=%d\n", len(sysMetrics))
+					a.jobs <- sysMetrics
+				}
+			}
+		}
+	}()
+
+	// ожидание сигнала завершения
+	<-ctx.Done()
+	fmt.Println("agent: shutdown")
 }
 
-// --- Backward-compat wrappers for tests ---
-
-// SendJSON — старая сигнатура, нужна для тестов.
-// Делегирует в SendJSONCtx с context.Background().
-func (s *MetricsSender) SendJSON(metric Metrics) error {
-	return s.SendJSONCtx(context.Background(), metric)
-}
-
-// SendBatchJSON — на случай, если тесты дернут батч без ctx.
+// — обёртки для тестов (оставляем как было) —
 func (s *MetricsSender) SendBatchJSON(batch []Metrics) error {
 	return s.SendBatchJSONCtx(context.Background(), batch)
 }
 
+// ===== helpers (оставлены как в оригинале) =====
+func shortStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "...(truncated)"
+}
+func maskHash(h string) string {
+	if h == "" {
+		return ""
+	}
+	if len(h) <= 10 {
+		return h
+	}
+	return h[:10] + "…"
+}
+
+// ---- main ----
 func main() {
 	cfg := config.ParseAgentFlags()
 
-	// инициализация логгера
 	if err := logger.Init(); err != nil {
 		panic(err)
 	}
 
-	// логируем все поля конфига
-	logger.GetLogger().Info("Agent config loaded &&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&",
+	logger.GetLogger().Info("Agent config loaded",
 		zap.String("server_address", cfg.ServerAddress),
 		zap.Duration("poll_interval", cfg.PollInterval),
 		zap.Duration("report_interval", cfg.ReportInterval),
 		zap.String("crypto_key", cfg.CryptoKey),
+		zap.Int("rate_limit", cfg.RateLimit),
 	)
 
-	//fmt.Printf("agetn: CryptoKey (%s) !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", cfg.CryptoKey)
-
-	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress, cfg.CryptoKey)
+	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress, cfg.CryptoKey, cfg.RateLimit)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
