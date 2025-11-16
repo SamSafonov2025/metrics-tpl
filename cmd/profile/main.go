@@ -12,6 +12,8 @@ import (
 	"os"
 	"runtime"
 	"runtime/pprof"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
@@ -23,6 +25,15 @@ const (
 	pprofAddr     = ":6060"
 	numMetrics    = 1000
 	numIterations = 10000
+)
+
+var (
+	// Пул буферов для переиспользования
+	bufferPool = sync.Pool{
+		New: func() interface{} {
+			return new(bytes.Buffer)
+		},
+	}
 )
 
 func main() {
@@ -52,11 +63,11 @@ func main() {
 	log.Println("Collecting memory profile during active workload...")
 
 	// Сохраняем профиль памяти во время активной работы
-	if err := saveMemProfile("profiles/base.pprof"); err != nil {
+	if err := saveMemProfile("profiles/result.pprof"); err != nil {
 		log.Fatal("Failed to save memory profile:", err)
 	}
 
-	log.Println("Memory profile saved to profiles/base.pprof")
+	log.Println("Memory profile saved to profiles/result.pprof")
 	log.Println("Press Ctrl+C to exit or wait...")
 
 	// Держим программу запущенной для возможности дополнительного профилирования
@@ -112,25 +123,66 @@ func runWorkload() {
 }
 
 func generateMetricsBatch(size int) []dto.Metrics {
+	// Создаем слайс с заданным размером
 	metrics := make([]dto.Metrics, size)
+
+	// Повторно используем буфер для имен метрик
+	var nameBuilder strings.Builder
+	nameBuilder.Grow(32) // Предаллокация для имени
+
 	for i := 0; i < size; i++ {
+		nameBuilder.Reset()
+
 		if i%2 == 0 {
 			value := rand.Float64() * 1000
+			// Избегаем fmt.Sprintf, используем strings.Builder
+			nameBuilder.WriteString("gauge_")
+			nameBuilder.WriteString(intToStr(rand.Intn(numMetrics)))
+
 			metrics[i] = dto.Metrics{
-				ID:    fmt.Sprintf("gauge_%d", rand.Intn(numMetrics)),
+				ID:    nameBuilder.String(),
 				MType: "gauge",
 				Value: &value,
 			}
 		} else {
 			delta := rand.Int63n(100)
+			// Избегаем fmt.Sprintf, используем strings.Builder
+			nameBuilder.WriteString("counter_")
+			nameBuilder.WriteString(intToStr(rand.Intn(numMetrics)))
+
 			metrics[i] = dto.Metrics{
-				ID:    fmt.Sprintf("counter_%d", rand.Intn(numMetrics)),
+				ID:    nameBuilder.String(),
 				MType: "counter",
 				Delta: &delta,
 			}
 		}
 	}
 	return metrics
+}
+
+// intToStr конвертирует int в string без аллокаций через fmt.Sprintf
+func intToStr(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	// Используем буфер на стеке
+	buf := make([]byte, 0, 12)
+	if n < 0 {
+		buf = append(buf, '-')
+		n = -n
+	}
+	// Собираем цифры в обратном порядке
+	i := len(buf)
+	for n > 0 {
+		buf = append(buf, byte('0'+n%10))
+		n /= 10
+		i++
+	}
+	// Разворачиваем
+	for left, right := len(buf)-i, len(buf)-1; left < right; left, right = left+1, right-1 {
+		buf[left], buf[right] = buf[right], buf[left]
+	}
+	return string(buf)
 }
 
 func saveMemProfile(filename string) error {
@@ -225,15 +277,21 @@ func serializeMetrics(storage *memstorage.MemStorage) {
 			Counters: counters,
 		}
 
+		// Получаем буфер из пула
+		buf := bufferPool.Get().(*bytes.Buffer)
+		buf.Reset()
+
 		// Сериализуем в JSON
-		var buf bytes.Buffer
-		encoder := json.NewEncoder(&buf)
+		encoder := json.NewEncoder(buf)
 		_ = encoder.Encode(resp)
 
 		// Десериализуем обратно
-		decoder := json.NewDecoder(&buf)
+		decoder := json.NewDecoder(bytes.NewReader(buf.Bytes()))
 		var decoded MetricsResponse
 		_ = decoder.Decode(&decoded)
+
+		// Возвращаем буфер в пул
+		bufferPool.Put(buf)
 
 		time.Sleep(10 * time.Millisecond)
 	}
