@@ -8,10 +8,11 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/service"
 	"github.com/SamSafonov2025/metrics-tpl/internal/storage/memstorage"
-	"github.com/go-chi/chi/v5"
 )
 
 // BenchmarkHandler_UpdateHandlerJSON измеряет производительность обновления метрики через JSON

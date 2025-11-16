@@ -1,8 +1,9 @@
 package router
 
 import (
-	"github.com/SamSafonov2025/metrics-tpl/internal/service"
 	"github.com/go-chi/chi/v5"
+
+	"github.com/SamSafonov2025/metrics-tpl/internal/service"
 
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/handlers"
 	"github.com/SamSafonov2025/metrics-tpl/internal/audit"

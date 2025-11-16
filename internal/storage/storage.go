@@ -1,10 +1,11 @@
 package storage
 
 import (
-	metrics2 "github.com/SamSafonov2025/metrics-tpl/internal/metrics"
-	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
 	"log"
 	"sync"
+
+	metrics2 "github.com/SamSafonov2025/metrics-tpl/internal/metrics"
+	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 

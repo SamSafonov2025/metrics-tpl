@@ -5,10 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt" // <— добавлено для форматирования сообщения об ошибке
-	"go.uber.org/zap"
 	"io"
 	"net/http"
 	"strings"
+
+	"go.uber.org/zap"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 )

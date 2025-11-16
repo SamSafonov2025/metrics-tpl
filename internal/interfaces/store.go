@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 )
 
