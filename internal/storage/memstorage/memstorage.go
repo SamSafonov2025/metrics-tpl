@@ -2,9 +2,10 @@ package memstorage
 
 import (
 	"context"
-	"github.com/SamSafonov2025/metrics-tpl/internal/consts"
 	"log"
 	"sync"
+
+	"github.com/SamSafonov2025/metrics-tpl/internal/consts"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	metrics2 "github.com/SamSafonov2025/metrics-tpl/internal/metrics"

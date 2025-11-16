@@ -2,17 +2,19 @@ package handlers
 
 import (
 	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
+
 	"github.com/SamSafonov2025/metrics-tpl/internal/audit"
 	"github.com/SamSafonov2025/metrics-tpl/internal/consts"
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 	"github.com/SamSafonov2025/metrics-tpl/internal/service"
-	"github.com/go-chi/chi/v5"
-	"go.uber.org/zap"
-	"net/http"
-	"strconv"
-	"strings"
-	"time"
 )
 
 type Handler struct {

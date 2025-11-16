@@ -4,8 +4,9 @@ package audit
 import (
 	"sync"
 
-	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 	"go.uber.org/zap"
+
+	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 )
 
 // AuditEvent представляет событие аудита

@@ -2,19 +2,21 @@ package main
 
 import (
 	"context"
-	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
-	"github.com/SamSafonov2025/metrics-tpl/internal/service"
 	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
+	"github.com/SamSafonov2025/metrics-tpl/internal/service"
+
+	"go.uber.org/zap"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/audit"
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 	"github.com/SamSafonov2025/metrics-tpl/internal/router"
 	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
-	"go.uber.org/zap"
 )
 
 func main() {
