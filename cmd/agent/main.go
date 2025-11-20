@@ -8,9 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/SamSafonov2025/metrics-tpl/internal/crypto"
-	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
-	"go.uber.org/zap"
 	"io"
 	"math/rand"
 	"net"
@@ -21,6 +18,11 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"go.uber.org/zap"
+
+	"github.com/SamSafonov2025/metrics-tpl/internal/crypto"
+	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
 

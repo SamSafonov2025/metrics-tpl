@@ -9,13 +9,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	"github.com/stretchr/testify/assert"
+
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/interfaces"
 	"github.com/SamSafonov2025/metrics-tpl/internal/service"
 	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
-	"github.com/go-chi/chi/v5"
-	"github.com/stretchr/testify/assert"
 )
 
 // helper: создаёт чистый сторадж и handler с сервисом
@@ -39,7 +40,7 @@ func newTestEnv(t *testing.T) (interfaces.Store, *Handler) {
 	})
 
 	svc := service.NewMetricsService(repo, 5*time.Second, nil) // ping не нужен в тестах
-	h := NewHandler(svc)
+	h := NewHandler(svc, nil)                                  // auditPublisher не нужен в тестах
 	return repo, h
 }
 

@@ -1,0 +1,34 @@
+File: [usertrap]
+Type: alloc_space
+Time: 2025-11-16 14:20:45 UTC
+Showing nodes accounting for 128.32MB, 97.70% of 131.34MB total
+Dropped 29 nodes (cum <= 0.66MB)
+      flat  flat%   sum%        cum   cum%
+   30.59MB 23.29% 23.29%    30.59MB 23.29%  reflect.mapassign_faststr0
+   21.90MB 16.67% 39.96%    21.90MB 16.67%  encoding/json.(*Decoder).refill
+   17.72MB 13.49% 53.46%    17.72MB 13.49%  bytes.growSlice
+   14.37MB 10.94% 64.40%    14.37MB 10.94%  github.com/SamSafonov2025/metrics-tpl/internal/storage/memstorage.(*MemStorage).GetAllCounters
+   12.83MB  9.77% 74.16%    12.83MB  9.77%  github.com/SamSafonov2025/metrics-tpl/internal/storage/memstorage.(*MemStorage).GetAllGauges
+   10.92MB  8.31% 82.48%    28.76MB 21.90%  encoding/json.mapEncoder.encode
+    8.50MB  6.47% 88.95%     8.50MB  6.47%  reflect.copyVal
+       5MB  3.81% 92.75%    40.09MB 30.53%  encoding/json.(*decodeState).object
+    4.50MB  3.43% 96.18%     4.50MB  3.43%  reflect.New
+       1MB  0.76% 96.94%        1MB  0.76%  main.generateMetricsBatch
+       1MB  0.76% 97.70%    14.30MB 10.89%  main.generateLoad
+         0     0% 97.70%    17.21MB 13.10%  bytes.(*Buffer).Write
+         0     0% 97.70%    17.72MB 13.49%  bytes.(*Buffer).grow
+         0     0% 97.70%    61.99MB 47.20%  encoding/json.(*Decoder).Decode
+         0     0% 97.70%    21.90MB 16.67%  encoding/json.(*Decoder).readValue
+         0     0% 97.70%    37.14MB 28.28%  encoding/json.(*Encoder).Encode
+         0     0% 97.70%    40.09MB 30.53%  encoding/json.(*decodeState).unmarshal
+         0     0% 97.70%    40.09MB 30.53%  encoding/json.(*decodeState).value
+         0     0% 97.70%    28.76MB 21.90%  encoding/json.(*encodeState).marshal
+         0     0% 97.70%    28.76MB 21.90%  encoding/json.(*encodeState).reflectValue
+         0     0% 97.70%     3.59MB  2.74%  encoding/json.floatEncoder.encode
+         0     0% 97.70%    28.76MB 21.90%  encoding/json.structEncoder.encode
+         0     0% 97.70%   115.03MB 87.59%  main.serializeMetrics
+         0     0% 97.70%        5MB  3.81%  reflect.(*MapIter).Key
+         0     0% 97.70%     3.50MB  2.66%  reflect.(*MapIter).Value
+         0     0% 97.70%    30.59MB 23.29%  reflect.Value.SetMapIndex
+         0     0% 97.70%    30.59MB 23.29%  reflect.mapassign_faststr
+         0     0% 97.70%        1MB  0.76%  sync.(*Pool).Get
