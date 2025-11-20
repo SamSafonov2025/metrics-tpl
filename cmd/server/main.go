@@ -2,18 +2,21 @@ package main
 
 import (
 	"context"
-	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
-	"github.com/SamSafonov2025/metrics-tpl/internal/service"
 	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
+	"github.com/SamSafonov2025/metrics-tpl/internal/service"
+
+	"go.uber.org/zap"
+
+	"github.com/SamSafonov2025/metrics-tpl/internal/audit"
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 	"github.com/SamSafonov2025/metrics-tpl/internal/router"
 	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
-	"go.uber.org/zap"
 )
 
 func main() {
@@ -37,7 +40,27 @@ func main() {
 	svc := service.NewMetricsService(s, cfg.StoreInterval,
 		func(ctx context.Context) error { return postgres.Pool.Ping(ctx) })
 
-	r := router.New(svc, cfg.CryptoKey)
+	// Инициализируем систему аудита
+	auditPublisher := audit.NewAuditPublisher()
+	defer auditPublisher.Close()
+
+	// Регистрируем наблюдателей на основе конфигурации
+	if cfg.AuditFile != "" {
+		fileObserver, err := audit.NewFileAuditObserver(cfg.AuditFile)
+		if err != nil {
+			logger.GetLogger().Fatal("Failed to create file audit observer", zap.Error(err))
+		}
+		auditPublisher.Register(fileObserver)
+		logger.GetLogger().Info("File audit observer registered", zap.String("file", cfg.AuditFile))
+	}
+
+	if cfg.AuditURL != "" {
+		urlObserver := audit.NewURLAuditObserver(cfg.AuditURL)
+		auditPublisher.Register(urlObserver)
+		logger.GetLogger().Info("URL audit observer registered", zap.String("url", cfg.AuditURL))
+	}
+
+	r := router.New(svc, cfg.CryptoKey, auditPublisher)
 
 	logger.GetLogger().Info("Server started",
 		zap.String("address", cfg.ServerAddress),

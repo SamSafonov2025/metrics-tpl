@@ -1,24 +1,43 @@
+// Package handlers содержит HTTP-обработчики для сервера метрик.
+//
+// Пакет предоставляет набор хендлеров для работы с метриками через REST API:
+// обновление метрик, получение значений, массовые операции и проверку состояния БД.
 package handlers
 
 import (
 	"encoding/json"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+	"go.uber.org/zap"
+
+	"github.com/SamSafonov2025/metrics-tpl/internal/audit"
 	"github.com/SamSafonov2025/metrics-tpl/internal/consts"
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 	"github.com/SamSafonov2025/metrics-tpl/internal/service"
-	"github.com/go-chi/chi/v5"
-	"go.uber.org/zap"
-	"net/http"
-	"strconv"
-	"strings"
 )
 
+// Handler содержит зависимости для обработки HTTP-запросов метрик.
+// Включает сервисный слой для работы с метриками и издателя событий аудита.
 type Handler struct {
-	Svc service.MetricsService
+	Svc            service.MetricsService
+	AuditPublisher *audit.AuditPublisher
 }
 
-func NewHandler(svc service.MetricsService) *Handler { return &Handler{Svc: svc} }
+// NewHandler создает новый экземпляр Handler с заданным сервисом и издателем аудита.
+// Параметр auditPublisher может быть nil, если аудит не требуется.
+func NewHandler(svc service.MetricsService, auditPublisher *audit.AuditPublisher) *Handler {
+	return &Handler{Svc: svc, AuditPublisher: auditPublisher}
+}
 
+// Ping проверяет доступность базы данных.
+// Возвращает HTTP 200 при успешном подключении или HTTP 500 при ошибке.
+//
+// Endpoint: GET /ping
 func (h *Handler) Ping(rw http.ResponseWriter, r *http.Request) {
 	if err := h.Svc.Ping(r.Context()); err != nil {
 		logger.GetLogger().Warn("Ping failed", zapError(err))
@@ -28,6 +47,10 @@ func (h *Handler) Ping(rw http.ResponseWriter, r *http.Request) {
 	rw.WriteHeader(http.StatusOK)
 }
 
+// HomeHandler возвращает HTML-страницу со списком всех метрик.
+// Отображает gauge и counter метрики в виде форматированного списка.
+//
+// Endpoint: GET /
 func (h *Handler) HomeHandler(rw http.ResponseWriter, r *http.Request) {
 	gauges, counters, err := h.Svc.List(r.Context())
 	if err != nil {
@@ -37,19 +60,38 @@ func (h *Handler) HomeHandler(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	var sb strings.Builder
+	// Предаллокируем память для улучшения производительности
+	sb.Grow(len(gauges)*50 + len(counters)*50 + 50)
+
 	sb.WriteString("<h4>Gauges</h4>")
 	for name, v := range gauges {
-		sb.WriteString(name + ": " + strconv.FormatFloat(v, 'f', -1, 64) + "</br>")
+		sb.WriteString(name)
+		sb.WriteString(": ")
+		sb.WriteString(strconv.FormatFloat(v, 'f', -1, 64))
+		sb.WriteString("</br>")
 	}
 	sb.WriteString("<h4>Counters</h4>")
 	for name, v := range counters {
-		sb.WriteString(name + ": " + strconv.FormatInt(v, 10) + "</br>")
+		sb.WriteString(name)
+		sb.WriteString(": ")
+		sb.WriteString(strconv.FormatInt(v, 10))
+		sb.WriteString("</br>")
 	}
 	rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 	rw.WriteHeader(http.StatusOK)
 	_, _ = rw.Write([]byte(sb.String()))
 }
 
+// UpdateHandler обновляет метрику через URL-параметры (устаревший формат).
+// Принимает тип метрики, имя и значение из URL.
+// Поддерживает типы "gauge" (float64) и "counter" (int64).
+//
+// Endpoint: POST /update/{metricType}/{metricName}/{metricValue}
+//
+// Возвращает:
+//   - HTTP 200 при успешном обновлении
+//   - HTTP 400 при некорректных параметрах
+//   - HTTP 500 при внутренней ошибке
 func (h *Handler) UpdateHandler(rw http.ResponseWriter, r *http.Request) {
 	m := dto.Metrics{
 		ID:    chi.URLParam(r, "metricName"),
@@ -83,9 +125,21 @@ func (h *Handler) UpdateHandler(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+	// Отправляем событие аудита после успешной обработки
+	h.sendAuditEvent(r, []string{m.ID})
 	rw.WriteHeader(http.StatusOK)
 }
 
+// GetHandler возвращает значение метрики в текстовом формате.
+// Принимает тип метрики и имя из URL-параметров.
+//
+// Endpoint: GET /value/{metricType}/{metricName}
+//
+// Возвращает:
+//   - HTTP 200 и значение метрики в теле ответа
+//   - HTTP 400 при некорректном типе метрики
+//   - HTTP 404 если метрика не найдена
+//   - HTTP 500 при внутренней ошибке
 func (h *Handler) GetHandler(rw http.ResponseWriter, r *http.Request) {
 	typ := chi.URLParam(r, "metricType")
 	id := chi.URLParam(r, "metricName")
@@ -116,6 +170,20 @@ func (h *Handler) GetHandler(rw http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// UpdateHandlerJSON обновляет метрику в формате JSON.
+// Принимает метрику в теле запроса и возвращает обновленные данные.
+//
+// Endpoint: POST /update/
+//
+// Формат тела запроса:
+//
+//	{"id":"metricName","type":"gauge","value":123.45}
+//	{"id":"metricName","type":"counter","delta":10}
+//
+// Возвращает:
+//   - HTTP 200 и обновленную метрику в JSON
+//   - HTTP 400 при некорректных данных
+//   - HTTP 500 при внутренней ошибке
 func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	var m dto.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&m); err != nil {
@@ -135,11 +203,29 @@ func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Отправляем событие аудита после успешной обработки
+	h.sendAuditEvent(r, []string{m.ID})
+
 	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(rw).Encode(m)
 }
 
+// ValueHandlerJSON возвращает значение метрики в формате JSON.
+// Принимает запрос с типом и именем метрики в теле запроса.
+//
+// Endpoint: POST /value/
+//
+// Формат тела запроса:
+//
+//	{"id":"metricName","type":"gauge"}
+//	{"id":"metricName","type":"counter"}
+//
+// Возвращает:
+//   - HTTP 200 и метрику в JSON с её текущим значением
+//   - HTTP 400 при некорректном типе метрики
+//   - HTTP 404 если метрика не найдена
+//   - HTTP 500 при внутренней ошибке
 func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	var req dto.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -169,6 +255,22 @@ func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(rw).Encode(m)
 }
 
+// UpdateMetrics обновляет несколько метрик одним запросом.
+// Принимает массив метрик в теле запроса и обрабатывает их атомарно.
+//
+// Endpoint: POST /updates/
+//
+// Формат тела запроса:
+//
+//	[
+//	  {"id":"metric1","type":"gauge","value":123.45},
+//	  {"id":"metric2","type":"counter","delta":10}
+//	]
+//
+// Возвращает:
+//   - HTTP 200 при успешном обновлении всех метрик
+//   - HTTP 400 при некорректных данных в любой из метрик
+//   - HTTP 500 при внутренней ошибке
 func (h *Handler) UpdateMetrics(rw http.ResponseWriter, r *http.Request) {
 	var body []dto.Metrics
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -186,10 +288,54 @@ func (h *Handler) UpdateMetrics(rw http.ResponseWriter, r *http.Request) {
 		http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
+
+	// Отправляем событие аудита после успешной обработки
+	metricNames := make([]string, len(body))
+	for i, m := range body {
+		metricNames[i] = m.ID
+	}
+	h.sendAuditEvent(r, metricNames)
+
 	rw.WriteHeader(http.StatusOK)
 }
 
-// маленьк
-// ие помощники, чтобы не тащить zap в каждое место
+// маленькие помощники, чтобы не тащить zap в каждое место
 func zapError(err error) zap.Field    { return zap.Error(err) }
 func zapString(k, v string) zap.Field { return zap.String(k, v) }
+
+// getClientIP извлекает IP адрес клиента из запроса
+func getClientIP(r *http.Request) string {
+	// Пробуем получить IP из заголовков прокси
+	ip := r.Header.Get("X-Real-IP")
+	if ip == "" {
+		ip = r.Header.Get("X-Forwarded-For")
+		if ip != "" {
+			// X-Forwarded-For может содержать список IP, берем первый
+			if idx := strings.Index(ip, ","); idx != -1 {
+				ip = ip[:idx]
+			}
+		}
+	}
+	// Если заголовков нет, берем из RemoteAddr
+	if ip == "" {
+		ip = r.RemoteAddr
+		// RemoteAddr может содержать порт, убираем его
+		if idx := strings.LastIndex(ip, ":"); idx != -1 {
+			ip = ip[:idx]
+		}
+	}
+	return strings.TrimSpace(ip)
+}
+
+// sendAuditEvent отправляет событие аудита
+func (h *Handler) sendAuditEvent(r *http.Request, metricNames []string) {
+	if h.AuditPublisher == nil {
+		return
+	}
+	event := audit.AuditEvent{
+		Timestamp: time.Now().Unix(),
+		Metrics:   metricNames,
+		IPAddress: getClientIP(r),
+	}
+	h.AuditPublisher.NotifyAll(event)
+}

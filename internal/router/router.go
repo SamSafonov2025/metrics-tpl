@@ -1,17 +1,19 @@
 package router
 
 import (
-	"github.com/SamSafonov2025/metrics-tpl/internal/service"
 	"github.com/go-chi/chi/v5"
 
+	"github.com/SamSafonov2025/metrics-tpl/internal/service"
+
 	"github.com/SamSafonov2025/metrics-tpl/cmd/server/handlers"
+	"github.com/SamSafonov2025/metrics-tpl/internal/audit"
 	"github.com/SamSafonov2025/metrics-tpl/internal/compressor"
 	"github.com/SamSafonov2025/metrics-tpl/internal/crypto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 )
 
 // New строит chi.Router и регистрирует все маршруты приложения.
-func New(svc service.MetricsService, key string) *chi.Mux {
+func New(svc service.MetricsService, key string, auditPublisher *audit.AuditPublisher) *chi.Mux {
 	r := chi.NewRouter()
 
 	// порядок важен:
@@ -20,7 +22,7 @@ func New(svc service.MetricsService, key string) *chi.Mux {
 	// 2) Глобальный логгер — увидит и 400 от HashValidationMiddleware
 	r.Use(logger.Middleware)
 
-	h := handlers.NewHandler(svc)
+	h := handlers.NewHandler(svc, auditPublisher)
 	c := crypto.Crypto{Key: key}
 
 	// Можно убрать HandlerLog(...) здесь, чтобы не было дублей.
