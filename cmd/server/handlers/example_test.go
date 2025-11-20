@@ -225,11 +225,11 @@ func ExampleHandler_UpdateMetrics() {
 	// Проверяем сохраненные значения
 	temp, _ := repo.GetGauge(context.Background(), "temperature")
 	hum, _ := repo.GetGauge(context.Background(), "humidity")
-	req_count, _ := repo.GetCounter(context.Background(), "total_requests")
+	reqCount, _ := repo.GetCounter(context.Background(), "total_requests")
 
 	fmt.Printf("temperature: %.1f\n", temp)
 	fmt.Printf("humidity: %.1f\n", hum)
-	fmt.Printf("total_requests: %d\n", req_count)
+	fmt.Printf("total_requests: %d\n", reqCount)
 
 	// Output:
 	// Статус: 200
