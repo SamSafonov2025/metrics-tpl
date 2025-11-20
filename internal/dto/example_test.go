@@ -107,10 +107,7 @@ func ExampleMetrics_jsonSerialization() {
 // ExampleMetrics_nilValues демонстрирует использование указателей для различения отсутствия значения.
 func ExampleMetrics_nilValues() {
 	// Метрика без значения (для запроса)
-	request := dto.Metrics{
-		ID:    "temperature",
-		MType: "gauge",
-	}
+	request := dto.Metrics{}
 
 	// Проверяем наличие значения
 	if request.Value == nil {
