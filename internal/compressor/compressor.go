@@ -6,21 +6,41 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"sync"
 )
 
-func GzipMiddleware(next http.Handler) http.Handler {
+// GzipMiddleware содержит конфигурацию и пул для gzip compression middleware.
+type GzipMiddleware struct {
+	// gzipWriterPool переиспользует gzip writers для компрессии
+	gzipWriterPool *sync.Pool
+}
+
+// NewGzipMiddleware создает новый экземпляр GzipMiddleware с инициализированным пулом.
+func NewGzipMiddleware() *GzipMiddleware {
+	return &GzipMiddleware{
+		gzipWriterPool: &sync.Pool{
+			New: func() interface{} {
+				return gzip.NewWriter(io.Discard)
+			},
+		},
+	}
+}
+
+// Handler возвращает HTTP middleware для обработки gzip compression/decompression.
+func (gm *GzipMiddleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Request URL: %s, Content-Encoding: %s, Accept-Encoding: %s", r.URL, r.Header.Get("Content-Encoding"), r.Header.Get("Accept-Encoding"))
 
 		if strings.Contains(r.Header.Get("Content-Encoding"), "gzip") {
+			// Создаем новый reader для каждого запроса
+			// gzip.Reader содержит внутреннее состояние, поэтому пулинг не эффективен
 			gzipReader, err := gzip.NewReader(r.Body)
 			if err != nil {
 				http.Error(w, "Unable to read gzip data", http.StatusBadRequest)
 				return
 			}
 			defer func() {
-				err := gzipReader.Close()
-				if err != nil {
+				if err := gzipReader.Close(); err != nil {
 					http.Error(w, "Unable to close gzip data", http.StatusBadRequest)
 				}
 			}()
@@ -29,10 +49,14 @@ func GzipMiddleware(next http.Handler) http.Handler {
 		}
 
 		if strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			gz := gzip.NewWriter(w)
+			// Получаем writer из пула
+			gz := gm.gzipWriterPool.Get().(*gzip.Writer)
+			defer gm.gzipWriterPool.Put(gz)
+
+			// Переинициализируем writer для нового response
+			gz.Reset(w)
 			defer func() {
-				err := gz.Close()
-				if err != nil {
+				if err := gz.Close(); err != nil {
 					http.Error(w, "Unable to close gzip data", http.StatusBadRequest)
 				}
 			}()

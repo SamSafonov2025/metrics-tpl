@@ -1,0 +1,54 @@
+File: main.exe
+Build ID: C:\Users\user\AppData\Local\go-build\7c\7c0aa26ade61779bfc0438809136483597cdf49e0e3294d5922bb0f06de79d74-d\main.exe2025-11-23 21:21:22.435839 +0300 MSK
+Type: alloc_space
+Time: 2025-11-24 13:03:32 MSK
+Showing nodes accounting for 13.99MB, 14.38% of 97.27MB total
+Dropped 4 nodes (cum <= 0.49MB)
+      flat  flat%   sum%        cum   cum%
+    5.64MB  5.80%  5.80%     5.64MB  5.80%  github.com/SamSafonov2025/metrics-tpl/internal/storage/memstorage.(*MemStorage).GetAllGauges
+    5.58MB  5.73% 11.54%     5.58MB  5.73%  encoding/json.(*Decoder).refill
+    4.68MB  4.81% 16.34%     6.79MB  6.98%  encoding/json.mapEncoder.encode
+    3.57MB  3.67% 20.01%     3.57MB  3.67%  reflect.mapassign_faststr0
+      -3MB  3.08% 16.93%     0.57MB  0.58%  encoding/json.(*decodeState).object
+   -1.03MB  1.05% 15.87%    -1.03MB  1.05%  github.com/SamSafonov2025/metrics-tpl/internal/storage/memstorage.(*MemStorage).GetAllCounters
+      -1MB  1.03% 14.84%       -1MB  1.03%  sync.(*Pool).pinSlow
+    0.54MB  0.56% 15.40%     0.54MB  0.56%  bytes.growSlice
+    0.51MB  0.52% 15.92%     0.51MB  0.52%  github.com/SamSafonov2025/metrics-tpl/internal/storage/memstorage.(*MemStorage).IncrementCounter
+   -0.50MB  0.52% 15.41%    -0.50MB  0.52%  main.generateMetricsBatch
+    0.50MB  0.52% 15.92%     0.50MB  0.52%  runtime.allocm
+   -0.50MB  0.51% 15.41%    -0.50MB  0.51%  internal/sync.(*HashTrieMap[go.shape.struct { net/netip.isV6 bool; net/netip.zoneV6 string },go.shape.struct { weak._ [0]*go.shape.struct { net/netip.isV6 bool; net/netip.zoneV6 string }; weak.u unsafe.Pointer }]).All
+   -0.50MB  0.51% 14.89%    -0.50MB  0.51%  fmt.Sprintf
+   -0.50MB  0.51% 14.38%    -0.50MB  0.51%  runtime.(*timers).addHeap
+         0     0% 14.38%     0.56MB  0.57%  bytes.(*Buffer).Write
+         0     0% 14.38%     0.54MB  0.56%  bytes.(*Buffer).grow
+         0     0% 14.38%     6.14MB  6.32%  encoding/json.(*Decoder).Decode
+         0     0% 14.38%     5.58MB  5.73%  encoding/json.(*Decoder).readValue
+         0     0% 14.38%     4.22MB  4.34%  encoding/json.(*Encoder).Encode
+         0     0% 14.38%     0.57MB  0.58%  encoding/json.(*decodeState).unmarshal
+         0     0% 14.38%     0.57MB  0.58%  encoding/json.(*decodeState).value
+         0     0% 14.38%     6.79MB  6.98%  encoding/json.(*encodeState).marshal
+         0     0% 14.38%     6.79MB  6.98%  encoding/json.(*encodeState).reflectValue
+         0     0% 14.38%     1.06MB  1.09%  encoding/json.intEncoder
+         0     0% 14.38%    -0.50MB  0.51%  encoding/json.newEncodeState
+         0     0% 14.38%     6.79MB  6.98%  encoding/json.structEncoder.encode
+         0     0% 14.38%    -0.49MB  0.51%  main.generateLoad
+         0     0% 14.38%    14.98MB 15.40%  main.serializeMetrics
+         0     0% 14.38%     1.50MB  1.54%  reflect.(*MapIter).Key
+         0     0% 14.38%    -1.50MB  1.54%  reflect.(*MapIter).Value
+         0     0% 14.38%     3.57MB  3.67%  reflect.Value.SetMapIndex
+         0     0% 14.38%     3.57MB  3.67%  reflect.mapassign_faststr
+         0     0% 14.38%    -0.50MB  0.51%  runtime.(*timer).maybeAdd
+         0     0% 14.38%    -0.50MB  0.51%  runtime.(*timer).modify
+         0     0% 14.38%    -0.50MB  0.51%  runtime.(*timer).reset (inline)
+         0     0% 14.38%     0.50MB  0.52%  runtime.newm
+         0     0% 14.38%    -0.50MB  0.51%  runtime.resetForSleep
+         0     0% 14.38%     0.50MB  0.52%  runtime.resetspinning
+         0     0% 14.38%     0.50MB  0.52%  runtime.schedule
+         0     0% 14.38%     0.50MB  0.52%  runtime.startm
+         0     0% 14.38%    -0.50MB  0.51%  runtime.unique_runtime_registerUniqueMapCleanup.func2
+         0     0% 14.38%     0.50MB  0.52%  runtime.wakep
+         0     0% 14.38%    -0.50MB  0.51%  sync.(*Pool).Get
+         0     0% 14.38%    -0.50MB  0.51%  sync.(*Pool).Put
+         0     0% 14.38%       -1MB  1.03%  sync.(*Pool).pin
+         0     0% 14.38%    -0.50MB  0.51%  unique.addUniqueMap[go.shape.struct { net/netip.isV6 bool; net/netip.zoneV6 string }].func1
+         0     0% 14.38%    -0.50MB  0.51%  unique.registerCleanup.func1
