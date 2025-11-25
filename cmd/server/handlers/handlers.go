@@ -5,10 +5,12 @@
 package handlers
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -19,6 +21,23 @@ import (
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 	"github.com/SamSafonov2025/metrics-tpl/internal/service"
+)
+
+var (
+	// bufferPool переиспользует буферы для JSON encoding/decoding
+	bufferPool = sync.Pool{
+		New: func() interface{} {
+			return new(bytes.Buffer)
+		},
+	}
+
+	// stringSlicePool переиспользует слайсы строк для метрик
+	stringSlicePool = sync.Pool{
+		New: func() interface{} {
+			s := make([]string, 0, 100)
+			return &s
+		},
+	}
 )
 
 // Handler содержит зависимости для обработки HTTP-запросов метрик.
@@ -206,9 +225,20 @@ func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	// Отправляем событие аудита после успешной обработки
 	h.sendAuditEvent(r, []string{m.ID})
 
+	// Используем буфер из пула для JSON encoding
+	buf := bufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufferPool.Put(buf)
+
+	if err := json.NewEncoder(buf).Encode(m); err != nil {
+		logger.GetLogger().Error("UpdateHandlerJSON encode error", zapError(err))
+		http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
 	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(rw).Encode(m)
+	_, _ = rw.Write(buf.Bytes())
 }
 
 // ValueHandlerJSON возвращает значение метрики в формате JSON.
@@ -250,9 +280,20 @@ func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Используем буфер из пула для JSON encoding
+	buf := bufferPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufferPool.Put(buf)
+
+	if err := json.NewEncoder(buf).Encode(m); err != nil {
+		logger.GetLogger().Error("ValueHandlerJSON encode error", zapError(err))
+		http.Error(rw, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
 	rw.Header().Set("Content-Type", "application/json")
 	rw.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(rw).Encode(m)
+	_, _ = rw.Write(buf.Bytes())
 }
 
 // UpdateMetrics обновляет несколько метрик одним запросом.
@@ -290,9 +331,19 @@ func (h *Handler) UpdateMetrics(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	// Отправляем событие аудита после успешной обработки
-	metricNames := make([]string, len(body))
-	for i, m := range body {
-		metricNames[i] = m.ID
+	// Используем пул для слайса имен метрик
+	metricNamesPtr := stringSlicePool.Get().(*[]string)
+	metricNames := (*metricNamesPtr)[:0] // Обнуляем длину, но сохраняем capacity
+	defer stringSlicePool.Put(metricNamesPtr)
+
+	// Расширяем слайс если нужно
+	if cap(metricNames) < len(body) {
+		metricNames = make([]string, 0, len(body))
+		*metricNamesPtr = metricNames
+	}
+
+	for _, m := range body {
+		metricNames = append(metricNames, m.ID)
 	}
 	h.sendAuditEvent(r, metricNames)
 
