@@ -29,16 +29,20 @@ func NewFileAuditObserver(filePath string) (*FileAuditObserver, error) {
 
 // Notify записывает событие в файл
 func (f *FileAuditObserver) Notify(event AuditEvent) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-
+	// Маршализация JSON вне критической секции (CPU-интенсивная операция)
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("failed to marshal audit event: %w", err)
 	}
 
-	// Добавляем событие на новой строке
-	if _, err := f.file.Write(append(data, '\n')); err != nil {
+	// Добавляем перевод строки вне критической секции
+	data = append(data, '\n')
+
+	// Критическая секция: только запись в файл и синхронизация с диском
+	f.mu.Lock()
+	defer f.mu.Unlock()
+
+	if _, err := f.file.Write(data); err != nil {
 		return fmt.Errorf("failed to write audit event to file: %w", err)
 	}
 
