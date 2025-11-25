@@ -59,7 +59,9 @@ func (f *FileAuditObserver) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.file != nil {
-		return f.file.Close()
+		err := f.file.Close()
+		f.file = nil // Устанавливаем в nil, чтобы избежать повторного закрытия
+		return err
 	}
 	return nil
 }
