@@ -27,15 +27,6 @@ const (
 	numIterations = 10000
 )
 
-var (
-	// Пул буферов для переиспользования
-	bufferPool = sync.Pool{
-		New: func() interface{} {
-			return new(bytes.Buffer)
-		},
-	}
-)
-
 func main() {
 	// Запускаем HTTP сервер для pprof
 	go func() {
@@ -53,9 +44,16 @@ func main() {
 	// Создаем storage, который будет жить во время всего профилирования
 	storage := memstorage.New()
 
+	// Создаем пул буферов для переиспользования
+	bufPool := &sync.Pool{
+		New: func() interface{} {
+			return new(bytes.Buffer)
+		},
+	}
+
 	// Запускаем фоновую нагрузку
 	go generateLoad(storage)
-	go serializeMetrics(storage)
+	go serializeMetrics(storage, bufPool)
 
 	// Ждем, пока накопятся данные
 	time.Sleep(2 * time.Second)
@@ -259,7 +257,7 @@ func generateLoad(storage *memstorage.MemStorage) {
 }
 
 // serializeMetrics создает дополнительные аллокации через JSON
-func serializeMetrics(storage *memstorage.MemStorage) {
+func serializeMetrics(storage *memstorage.MemStorage, bufferPool *sync.Pool) {
 	ctx := context.Background()
 
 	for {

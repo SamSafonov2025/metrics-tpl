@@ -23,34 +23,35 @@ import (
 	"github.com/SamSafonov2025/metrics-tpl/internal/service"
 )
 
-var (
-	// bufferPool переиспользует буферы для JSON encoding/decoding
-	bufferPool = sync.Pool{
-		New: func() interface{} {
-			return new(bytes.Buffer)
-		},
-	}
-
-	// stringSlicePool переиспользует слайсы строк для метрик
-	stringSlicePool = sync.Pool{
-		New: func() interface{} {
-			s := make([]string, 0, 100)
-			return &s
-		},
-	}
-)
-
 // Handler содержит зависимости для обработки HTTP-запросов метрик.
 // Включает сервисный слой для работы с метриками и издателя событий аудита.
 type Handler struct {
 	Svc            service.MetricsService
 	AuditPublisher *audit.AuditPublisher
+	// bufferPool переиспользует буферы для JSON encoding/decoding
+	bufferPool *sync.Pool
+	// stringSlicePool переиспользует слайсы строк для метрик
+	stringSlicePool *sync.Pool
 }
 
 // NewHandler создает новый экземпляр Handler с заданным сервисом и издателем аудита.
 // Параметр auditPublisher может быть nil, если аудит не требуется.
 func NewHandler(svc service.MetricsService, auditPublisher *audit.AuditPublisher) *Handler {
-	return &Handler{Svc: svc, AuditPublisher: auditPublisher}
+	return &Handler{
+		Svc:            svc,
+		AuditPublisher: auditPublisher,
+		bufferPool: &sync.Pool{
+			New: func() interface{} {
+				return new(bytes.Buffer)
+			},
+		},
+		stringSlicePool: &sync.Pool{
+			New: func() interface{} {
+				s := make([]string, 0, 100)
+				return &s
+			},
+		},
+	}
 }
 
 // Ping проверяет доступность базы данных.
@@ -226,9 +227,9 @@ func (h *Handler) UpdateHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	h.sendAuditEvent(r, []string{m.ID})
 
 	// Используем буфер из пула для JSON encoding
-	buf := bufferPool.Get().(*bytes.Buffer)
+	buf := h.bufferPool.Get().(*bytes.Buffer)
 	buf.Reset()
-	defer bufferPool.Put(buf)
+	defer h.bufferPool.Put(buf)
 
 	if err := json.NewEncoder(buf).Encode(m); err != nil {
 		logger.GetLogger().Error("UpdateHandlerJSON encode error", zapError(err))
@@ -281,9 +282,9 @@ func (h *Handler) ValueHandlerJSON(rw http.ResponseWriter, r *http.Request) {
 	}
 
 	// Используем буфер из пула для JSON encoding
-	buf := bufferPool.Get().(*bytes.Buffer)
+	buf := h.bufferPool.Get().(*bytes.Buffer)
 	buf.Reset()
-	defer bufferPool.Put(buf)
+	defer h.bufferPool.Put(buf)
 
 	if err := json.NewEncoder(buf).Encode(m); err != nil {
 		logger.GetLogger().Error("ValueHandlerJSON encode error", zapError(err))
@@ -332,9 +333,9 @@ func (h *Handler) UpdateMetrics(rw http.ResponseWriter, r *http.Request) {
 
 	// Отправляем событие аудита после успешной обработки
 	// Используем пул для слайса имен метрик
-	metricNamesPtr := stringSlicePool.Get().(*[]string)
+	metricNamesPtr := h.stringSlicePool.Get().(*[]string)
 	metricNames := (*metricNamesPtr)[:0] // Обнуляем длину, но сохраняем capacity
-	defer stringSlicePool.Put(metricNamesPtr)
+	defer h.stringSlicePool.Put(metricNamesPtr)
 
 	// Расширяем слайс если нужно
 	if cap(metricNames) < len(body) {
