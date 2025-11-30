@@ -33,7 +33,8 @@ func BenchmarkGzipMiddleware_Decompress(b *testing.B) {
 				w.WriteHeader(http.StatusOK)
 			})
 
-			middleware := GzipMiddleware(handler)
+			gzipMW := NewGzipMiddleware()
+			middleware := gzipMW.Handler(handler)
 
 			b.ResetTimer()
 			b.ReportAllocs()
@@ -61,7 +62,8 @@ func BenchmarkGzipMiddleware_Compress(b *testing.B) {
 				_, _ = w.Write([]byte(data))
 			})
 
-			middleware := GzipMiddleware(handler)
+			gzipMW := NewGzipMiddleware()
+			middleware := gzipMW.Handler(handler)
 
 			b.ResetTimer()
 			b.ReportAllocs()
@@ -85,7 +87,8 @@ func BenchmarkGzipMiddleware_NoCompression(b *testing.B) {
 		_, _ = w.Write([]byte(data))
 	})
 
-	middleware := GzipMiddleware(handler)
+	gzipMW := NewGzipMiddleware()
+	middleware := gzipMW.Handler(handler)
 
 	b.ResetTimer()
 	b.ReportAllocs()

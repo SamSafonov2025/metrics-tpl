@@ -18,7 +18,8 @@ func New(svc service.MetricsService, key string, auditPublisher *audit.AuditPubl
 
 	// порядок важен:
 	// 1) распаковка gzip (если есть)
-	r.Use(compressor.GzipMiddleware)
+	gzipMW := compressor.NewGzipMiddleware()
+	r.Use(gzipMW.Handler)
 	// 2) Глобальный логгер — увидит и 400 от HashValidationMiddleware
 	r.Use(logger.Middleware)
 
