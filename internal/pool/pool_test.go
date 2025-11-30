@@ -214,10 +214,7 @@ func BenchmarkPool_vs_Allocation(b *testing.B) {
 	b.Run("Direct", func(b *testing.B) {
 		var sum int
 		for i := 0; i < b.N; i++ {
-			obj := &TestStruct{
-				Data:   make([]byte, 0, 1024),
-				Counts: make(map[string]int),
-			}
+			obj := &TestStruct{}
 			obj.Value = i
 			sum += obj.Value
 		}
