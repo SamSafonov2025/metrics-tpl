@@ -32,6 +32,12 @@ import (
 	"github.com/shirou/gopsutil/mem"
 )
 
+var (
+	buildVersion string = "N/A"
+	buildDate    string = "N/A"
+	buildCommit  string = "N/A"
+)
+
 type Metrics struct {
 	ID    string   `json:"id"`
 	MType string   `json:"type"`
@@ -394,6 +400,11 @@ func maskHash(h string) string {
 
 // ---- main ----
 func main() {
+	// Выводим информацию о сборке
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
+
 	cfg := config.ParseAgentFlags()
 
 	if err := logger.Init(); err != nil {
