@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -29,6 +30,12 @@ import (
 	// NEW: gopsutil
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/mem"
+)
+
+var (
+	buildVersion string = "N/A"
+	buildDate    string = "N/A"
+	buildCommit  string = "N/A"
 )
 
 type Metrics struct {
@@ -393,10 +400,15 @@ func maskHash(h string) string {
 
 // ---- main ----
 func main() {
+	// Выводим информацию о сборке
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
+
 	cfg := config.ParseAgentFlags()
 
 	if err := logger.Init(); err != nil {
-		panic(err)
+		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 
 	logger.GetLogger().Info("Agent config loaded",

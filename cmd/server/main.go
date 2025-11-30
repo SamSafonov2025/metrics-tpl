@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"log"
 	"net/http"
 	"os/signal"
 	"syscall"
@@ -19,11 +21,22 @@ import (
 	"github.com/SamSafonov2025/metrics-tpl/internal/storage"
 )
 
+var (
+	buildVersion string = "N/A"
+	buildDate    string = "N/A"
+	buildCommit  string = "N/A"
+)
+
 func main() {
+	// Выводим информацию о сборке
+	fmt.Printf("Build version: %s\n", buildVersion)
+	fmt.Printf("Build date: %s\n", buildDate)
+	fmt.Printf("Build commit: %s\n", buildCommit)
+
 	cfg := config.ParseServerFlags()
 
 	if err := logger.Init(); err != nil {
-		panic(err)
+		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 
 	// логируем все поля конфига
