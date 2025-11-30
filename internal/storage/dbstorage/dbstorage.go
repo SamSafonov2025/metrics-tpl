@@ -3,6 +3,7 @@ package dbstorage
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/consts"
 	"github.com/SamSafonov2025/metrics-tpl/internal/dto"
@@ -156,7 +157,7 @@ func (db *DBStorage) SetMetrics(ctx context.Context, metrics []dto.Metrics) erro
 	defer func() {
 		if err != nil {
 			if rollbackErr := tx.Rollback(context.Background()); rollbackErr != nil {
-				log.Fatalf("Unable to rollback transaction: %v", rollbackErr)
+				log.Printf("Unable to rollback transaction: %v", rollbackErr)
 			}
 		}
 	}()
@@ -179,7 +180,7 @@ func (db *DBStorage) SetMetrics(ctx context.Context, metrics []dto.Metrics) erro
 
 	err = tx.Commit(context.Background())
 	if err != nil {
-		log.Fatalf("Unable to commit transaction: %v", err)
+		return fmt.Errorf("unable to commit transaction: %w", err)
 	}
 
 	return nil

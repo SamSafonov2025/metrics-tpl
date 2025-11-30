@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"os/signal"
 	"syscall"
@@ -23,7 +24,7 @@ func main() {
 	cfg := config.ParseServerFlags()
 
 	if err := logger.Init(); err != nil {
-		panic(err)
+		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 
 	// логируем все поля конфига

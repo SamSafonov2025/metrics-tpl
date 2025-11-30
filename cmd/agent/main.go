@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"math/rand"
 	"net"
 	"net/http"
@@ -396,7 +397,7 @@ func main() {
 	cfg := config.ParseAgentFlags()
 
 	if err := logger.Init(); err != nil {
-		panic(err)
+		log.Fatalf("Failed to initialize logger: %v", err)
 	}
 
 	logger.GetLogger().Info("Agent config loaded",
