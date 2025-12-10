@@ -99,7 +99,9 @@ func main() {
 	)
 
 	server := &http.Server{Addr: cfg.ServerAddress, Handler: r}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+
+	// Graceful shutdown: перехватываем сигналы SIGINT, SIGTERM, SIGQUIT
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
 	go func() {
@@ -108,12 +110,21 @@ func main() {
 		}
 	}()
 
+	// Ожидаем сигнал завершения
 	<-ctx.Done()
+	logger.GetLogger().Info("Received shutdown signal, gracefully shutting down server...")
 
-	logger.GetLogger().Info("Shutting down server...")
+	// Останавливаем HTTP сервер с тайм-аутом
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.GetLogger().Fatal("Server forced to shutdown", zap.Error(err))
+		logger.GetLogger().Error("Server shutdown error", zap.Error(err))
+	} else {
+		logger.GetLogger().Info("HTTP server stopped successfully")
 	}
+
+	// Сохраняем все несохранённые данные перед завершением
+	logger.GetLogger().Info("Saving unsaved data...")
+	storage.Close()
+	logger.GetLogger().Info("Server shutdown completed successfully")
 }

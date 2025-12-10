@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,8 +33,6 @@ import (
 	// NEW: gopsutil
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/mem"
-
-	"crypto/rsa"
 )
 
 var (
@@ -310,6 +310,7 @@ type Agent struct {
 
 	rateLimit int
 	jobs      chan []Metrics
+	wg        sync.WaitGroup // для отслеживания активных воркеров
 }
 
 func NewAgent(pollInterval, reportInterval time.Duration, serverAddress, cryptoKey, publicKeyPath string, rateLimit int) *Agent {
@@ -339,11 +340,30 @@ func (a *Agent) Start(ctx context.Context) {
 
 	// (4) стартуем пул отправителей
 	for i := 0; i < a.rateLimit; i++ {
+		a.wg.Add(1)
 		go func(id int) {
+			defer a.wg.Done()
 			for {
 				select {
 				case <-ctx.Done():
-					return
+					// Контекст отменен, но продолжаем обрабатывать оставшиеся задачи
+					// Обрабатываем все оставшиеся задачи из канала
+					for {
+						select {
+						case batch, ok := <-a.jobs:
+							if !ok {
+								// Канал закрыт, выходим
+								return
+							}
+							// Отправляем с новым контекстом (старый отменен)
+							sendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+							_ = a.sender.SendBatchJSONCtx(sendCtx, batch)
+							cancel()
+						default:
+							// Канал пуст, выходим
+							return
+						}
+					}
 				case batch := <-a.jobs:
 					sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 					_ = a.sender.SendBatchJSONCtx(sendCtx, batch)
@@ -409,7 +429,14 @@ func (a *Agent) Start(ctx context.Context) {
 
 	// ожидание сигнала завершения
 	<-ctx.Done()
-	fmt.Println("agent: shutdown")
+	fmt.Println("agent: received shutdown signal, finishing current work...")
+
+	// Закрываем канал jobs, чтобы воркеры завершили обработку оставшихся задач
+	close(a.jobs)
+
+	// Ожидаем завершения всех воркеров
+	a.wg.Wait()
+	fmt.Println("agent: all metrics sent, shutdown completed successfully")
 }
 
 // — обёртки для тестов (оставляем как было) —
@@ -458,7 +485,8 @@ func main() {
 
 	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress, cfg.CryptoKey, cfg.CryptoKeyPath, cfg.RateLimit)
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	// Graceful shutdown: перехватываем сигналы SIGINT, SIGTERM, SIGQUIT
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
 	agent.Start(ctx)
