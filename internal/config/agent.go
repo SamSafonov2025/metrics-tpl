@@ -12,7 +12,8 @@ type AgentConfig struct {
 	ServerAddress  string
 	PollInterval   time.Duration
 	ReportInterval time.Duration
-	CryptoKey      string
+	CryptoKey      string // HMAC signing key
+	CryptoKeyPath  string // Path to RSA public key file for encryption
 	RateLimit      int
 }
 
@@ -25,6 +26,7 @@ func ParseAgentFlags() *AgentConfig {
 	poll := atoiEnv("POLL_INTERVAL", 2)
 	report := atoiEnv("REPORT_INTERVAL", 10)
 	key := getEnv("KEY", "")
+	cryptoKeyPath := getEnv("CRYPTO_KEY", "")
 	rate := atoiEnv("RATE_LIMIT", 4)
 
 	// flags (флаг имеет приоритет над env)
@@ -32,6 +34,7 @@ func ParseAgentFlags() *AgentConfig {
 	flag.IntVar(&pollSeconds, "p", poll, "Poll interval in seconds")
 	flag.IntVar(&reportSeconds, "r", report, "Report interval in seconds")
 	flag.StringVar(&cfg.CryptoKey, "k", key, "Key for hash calculation")
+	flag.StringVar(&cfg.CryptoKeyPath, "crypto-key", cryptoKeyPath, "Path to RSA public key file for encryption")
 	flag.IntVar(&cfg.RateLimit, "l", rate, "Max concurrent outbound requests (rate limit)")
 	flag.Parse()
 

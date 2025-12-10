@@ -49,7 +49,7 @@ func TestMetricsSender_SendBatchJSON(t *testing.T) {
 	}))
 	defer server.Close()
 
-	sender := NewMetricsSender(server.Listener.Addr().String(), "123")
+	sender := NewMetricsSender(server.Listener.Addr().String(), "123", "")
 
 	value := 42.5
 	metric := Metrics{ID: "testMetric", MType: "gauge", Value: &value}

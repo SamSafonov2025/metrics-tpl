@@ -24,12 +24,15 @@ import (
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/crypto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
+	"github.com/SamSafonov2025/metrics-tpl/internal/rsacrypto"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/config"
 
 	// NEW: gopsutil
 	"github.com/shirou/gopsutil/cpu"
 	"github.com/shirou/gopsutil/mem"
+
+	"crypto/rsa"
 )
 
 var (
@@ -118,14 +121,28 @@ type MetricsSender struct {
 	serverAddress string
 	client        *http.Client
 	cryptoKey     string
+	publicKey     *rsa.PublicKey // RSA public key for encryption
 }
 
-func NewMetricsSender(serverAddress string, cryptoKey string) *MetricsSender {
-	return &MetricsSender{
+func NewMetricsSender(serverAddress string, cryptoKey string, publicKeyPath string) *MetricsSender {
+	sender := &MetricsSender{
 		serverAddress: serverAddress,
 		client:        &http.Client{Timeout: 5 * time.Second},
 		cryptoKey:     cryptoKey,
 	}
+
+	// Load RSA public key if path is provided
+	if publicKeyPath != "" {
+		pubKey, err := rsacrypto.LoadPublicKey(publicKeyPath)
+		if err != nil {
+			fmt.Printf("agent: WARNING - failed to load public key from %s: %v\n", publicKeyPath, err)
+		} else {
+			sender.publicKey = pubKey
+			fmt.Printf("agent: loaded RSA public key from %s\n", publicKeyPath)
+		}
+	}
+
+	return sender
 }
 
 // ———— RETRY CORE ————
@@ -205,8 +222,24 @@ func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload 
 		return err
 	}
 
+	// Get the compressed data
+	compressedData := buf.Bytes()
+	var bodyData []byte
+
+	// Encrypt if public key is available
+	if s.publicKey != nil {
+		encrypted, err := rsacrypto.EncryptChunked(compressedData, s.publicKey)
+		if err != nil {
+			return fmt.Errorf("encryption failed: %w", err)
+		}
+		bodyData = encrypted
+		fmt.Printf("agent: encrypted data: gz=%dB -> enc=%dB\n", len(compressedData), len(encrypted))
+	} else {
+		bodyData = compressedData
+	}
+
 	urlStr := fmt.Sprintf("http://%s%s", s.serverAddress, path)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, &buf)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, urlStr, bytes.NewReader(bodyData))
 	if err != nil {
 		return err
 	}
@@ -214,13 +247,16 @@ func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload 
 	hash := crypto.GenerateHash(jsonData, s.cryptoKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
+	if s.publicKey != nil {
+		req.Header.Set("X-Encrypted", "true") // Indicate that the body is encrypted
+	}
 	if s.cryptoKey != "" {
 		req.Header.Set("HashSHA256", hash) // подписываем ДЕГЗИПНУТОЕ json-тело
 	}
 
 	const maxDump = 512
-	fmt.Printf("agent: POST %s | json=%dB gz=%dB | hash=%s\n",
-		urlStr, len(jsonData), buf.Len(), maskHash(hash))
+	fmt.Printf("agent: POST %s | json=%dB gz=%dB body=%dB | hash=%s | encrypted=%t\n",
+		urlStr, len(jsonData), len(compressedData), len(bodyData), maskHash(hash), s.publicKey != nil)
 
 	start := time.Now()
 	resp, err := s.client.Do(req)
@@ -276,7 +312,7 @@ type Agent struct {
 	jobs      chan []Metrics
 }
 
-func NewAgent(pollInterval, reportInterval time.Duration, serverAddress, cryptoKey string, rateLimit int) *Agent {
+func NewAgent(pollInterval, reportInterval time.Duration, serverAddress, cryptoKey, publicKeyPath string, rateLimit int) *Agent {
 	if rateLimit < 1 {
 		rateLimit = 1
 	}
@@ -284,7 +320,7 @@ func NewAgent(pollInterval, reportInterval time.Duration, serverAddress, cryptoK
 		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
 		collector:      NewMetricsCollector(),
-		sender:         NewMetricsSender(serverAddress, cryptoKey),
+		sender:         NewMetricsSender(serverAddress, cryptoKey, publicKeyPath),
 		rateLimit:      rateLimit,
 		// небольшой буфер, чтобы сбор не стопорился при кратковременных всплесках
 		jobs: make(chan []Metrics, rateLimit*2),
@@ -298,8 +334,8 @@ func (a *Agent) Start(ctx context.Context) {
 	defer pollTicker.Stop()
 	defer reportTicker.Stop()
 
-	fmt.Printf("agent: started | poll=%s report=%s | server=%s | hmac=%t | workers=%d\n",
-		a.pollInterval, a.reportInterval, a.sender.serverAddress, a.sender.cryptoKey != "", a.rateLimit)
+	fmt.Printf("agent: started | poll=%s report=%s | server=%s | hmac=%t | rsa=%t | workers=%d\n",
+		a.pollInterval, a.reportInterval, a.sender.serverAddress, a.sender.cryptoKey != "", a.sender.publicKey != nil, a.rateLimit)
 
 	// (4) стартуем пул отправителей
 	for i := 0; i < a.rateLimit; i++ {
@@ -416,10 +452,11 @@ func main() {
 		zap.Duration("poll_interval", cfg.PollInterval),
 		zap.Duration("report_interval", cfg.ReportInterval),
 		zap.String("crypto_key", cfg.CryptoKey),
+		zap.String("crypto_key_path", cfg.CryptoKeyPath),
 		zap.Int("rate_limit", cfg.RateLimit),
 	)
 
-	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress, cfg.CryptoKey, cfg.RateLimit)
+	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress, cfg.CryptoKey, cfg.CryptoKeyPath, cfg.RateLimit)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

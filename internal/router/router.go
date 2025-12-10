@@ -1,6 +1,8 @@
 package router
 
 import (
+	"crypto/rsa"
+
 	"github.com/go-chi/chi/v5"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/service"
@@ -10,13 +12,18 @@ import (
 	"github.com/SamSafonov2025/metrics-tpl/internal/compressor"
 	"github.com/SamSafonov2025/metrics-tpl/internal/crypto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
+	"github.com/SamSafonov2025/metrics-tpl/internal/rsadecryptor"
 )
 
 // New строит chi.Router и регистрирует все маршруты приложения.
-func New(svc service.MetricsService, key string, auditPublisher *audit.AuditPublisher) *chi.Mux {
+func New(svc service.MetricsService, key string, privateKey *rsa.PrivateKey, auditPublisher *audit.AuditPublisher) *chi.Mux {
 	r := chi.NewRouter()
 
 	// порядок важен:
+	// 0) расшифровка RSA (если есть)
+	if privateKey != nil {
+		r.Use(rsadecryptor.RSADecryptMiddleware(privateKey))
+	}
 	// 1) распаковка gzip (если есть)
 	gzipMW := compressor.NewGzipMiddleware()
 	r.Use(gzipMW.Handler)

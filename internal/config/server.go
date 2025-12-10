@@ -13,7 +13,8 @@ type ServerConfig struct {
 	FileStoragePath string
 	Restore         bool
 	Database        string
-	CryptoKey       string
+	CryptoKey       string // HMAC signing key
+	CryptoKeyPath   string // Path to RSA private key file for decryption
 	AuditFile       string // путь к файлу для логов аудита
 	AuditURL        string // URL для отправки логов аудита
 }
@@ -32,6 +33,7 @@ func ParseServerFlags() *ServerConfig {
 		"Database connection string",
 	)
 	flag.StringVar(&cfg.CryptoKey, "k", "", "Key for hash calculation")
+	flag.StringVar(&cfg.CryptoKeyPath, "crypto-key", "", "Path to RSA private key file for decryption")
 	flag.StringVar(&cfg.AuditFile, "audit-file", "", "Audit log file path")
 	flag.StringVar(&cfg.AuditURL, "audit-url", "", "Audit log URL endpoint")
 
@@ -60,7 +62,10 @@ func ParseServerFlags() *ServerConfig {
 	if v, ok := os.LookupEnv("KEY"); ok {
 		cfg.CryptoKey = v
 	}
-	if v, ok := os.LookupEnv("AUDIT_FILE"); ok {
+	if v := os.Getenv("CRYPTO_KEY"); v != "" {
+		cfg.CryptoKeyPath = v
+	}
+	if v := os.Getenv("AUDIT_FILE"); v != "" {
 		cfg.AuditFile = v
 	}
 	if v, ok := os.LookupEnv("AUDIT_URL"); ok {
