@@ -11,6 +11,7 @@ import (
 
 type ServerConfig struct {
 	ServerAddress   string        `env:"ADDRESS" env-default:"localhost:8080"`
+	GRPCAddress     string        `env:"GRPC_ADDRESS" env-default:""`
 	StoreInterval   time.Duration `env:"STORE_INTERVAL" env-default:"300s"`
 	FileStoragePath string        `env:"FILE_STORAGE_PATH" env-default:"/tmp/metrics-db.json"`
 	Restore         bool          `env:"RESTORE" env-default:"false"`
@@ -36,6 +37,7 @@ func ParseServerFlags() *ServerConfig {
 	// Временные переменные для флагов (чтобы отличить явно заданные от дефолтных)
 	var (
 		addrFlag          string
+		grpcAddrFlag      string
 		intervalFlag      time.Duration
 		fileFlag          string
 		restoreFlag       bool
@@ -49,6 +51,7 @@ func ParseServerFlags() *ServerConfig {
 
 	// Парсим флаги во временные переменные
 	flag.StringVar(&addrFlag, "a", "", "HTTP server endpoint address")
+	flag.StringVar(&grpcAddrFlag, "g", "", "gRPC server endpoint address")
 	flag.DurationVar(&intervalFlag, "i", 0, "Store interval (0 = sync mode)")
 	flag.StringVar(&fileFlag, "f", "", "File storage path")
 	flag.BoolVar(&restoreFlag, "r", false, "Restore metrics from file")
@@ -73,6 +76,8 @@ func ParseServerFlags() *ServerConfig {
 		switch f.Name {
 		case "a":
 			cfg.ServerAddress = addrFlag
+		case "g":
+			cfg.GRPCAddress = grpcAddrFlag
 		case "i":
 			cfg.StoreInterval = intervalFlag
 		case "f":
@@ -100,6 +105,7 @@ func ParseServerFlags() *ServerConfig {
 // JSONServerConfig represents the structure of the JSON configuration file
 type JSONServerConfig struct {
 	Address       string `json:"address"`
+	GRPCAddress   string `json:"grpc_address"`
 	Restore       bool   `json:"restore"`
 	StoreInterval string `json:"store_interval"`
 	StoreFile     string `json:"store_file"`
@@ -123,6 +129,9 @@ func loadJSONConfig(filename string, cfg *ServerConfig) error {
 	// Применяем значения из JSON, если они не пустые
 	if jsonCfg.Address != "" {
 		cfg.ServerAddress = jsonCfg.Address
+	}
+	if jsonCfg.GRPCAddress != "" {
+		cfg.GRPCAddress = jsonCfg.GRPCAddress
 	}
 	if jsonCfg.StoreFile != "" {
 		cfg.FileStoragePath = jsonCfg.StoreFile

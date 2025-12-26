@@ -329,6 +329,8 @@ type Agent struct {
 	reportInterval time.Duration
 	collector      *MetricsCollector
 	sender         *MetricsSender
+	grpcSender     *MetricsGRPCSender // gRPC отправитель (опционально)
+	useGRPC        bool               // флаг использования gRPC
 
 	rateLimit    int
 	jobs         chan []Metrics
@@ -336,19 +338,34 @@ type Agent struct {
 	producersWg  sync.WaitGroup // для отслеживания горутин-producers
 }
 
-func NewAgent(pollInterval, reportInterval time.Duration, serverAddress, cryptoKey, publicKeyPath string, rateLimit int) *Agent {
+func NewAgent(pollInterval, reportInterval time.Duration, serverAddress, cryptoKey, publicKeyPath string, grpcAddress string, rateLimit int) *Agent {
 	if rateLimit < 1 {
 		rateLimit = 1
 	}
-	return &Agent{
+
+	agent := &Agent{
 		pollInterval:   pollInterval,
 		reportInterval: reportInterval,
 		collector:      NewMetricsCollector(),
 		sender:         NewMetricsSender(serverAddress, cryptoKey, publicKeyPath),
 		rateLimit:      rateLimit,
-		// небольшой буфер, чтобы сбор не стопорился при кратковременных всплесках
-		jobs: make(chan []Metrics, rateLimit*2),
+		useGRPC:        grpcAddress != "",
+		jobs:           make(chan []Metrics, rateLimit*2),
 	}
+
+	// Создаем gRPC sender, если указан адрес
+	if grpcAddress != "" {
+		grpcSender, err := NewMetricsGRPCSender(grpcAddress)
+		if err != nil {
+			fmt.Printf("agent: WARNING - failed to create gRPC sender: %v, falling back to HTTP\n", err)
+			agent.useGRPC = false
+		} else {
+			agent.grpcSender = grpcSender
+			fmt.Printf("agent: gRPC sender initialized for %s\n", grpcAddress)
+		}
+	}
+
+	return agent
 }
 
 func (a *Agent) Start(ctx context.Context) {
@@ -380,7 +397,11 @@ func (a *Agent) Start(ctx context.Context) {
 							}
 							// Отправляем с новым контекстом (старый отменен)
 							sendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-							_ = a.sender.SendBatchJSONCtx(sendCtx, batch)
+							if a.useGRPC && a.grpcSender != nil {
+								_ = a.grpcSender.SendBatchGRPCCtx(sendCtx, batch)
+							} else {
+								_ = a.sender.SendBatchJSONCtx(sendCtx, batch)
+							}
 							cancel()
 						default:
 							// Канал пуст, выходим
@@ -389,7 +410,11 @@ func (a *Agent) Start(ctx context.Context) {
 					}
 				case batch := <-a.jobs:
 					sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-					a.sender.SendBatchJSONCtx(sendCtx, batch)
+					if a.useGRPC && a.grpcSender != nil {
+						a.grpcSender.SendBatchGRPCCtx(sendCtx, batch)
+					} else {
+						a.sender.SendBatchJSONCtx(sendCtx, batch)
+					}
 					cancel()
 				}
 			}
@@ -508,6 +533,7 @@ func main() {
 
 	logger.GetLogger().Info("Agent config loaded",
 		zap.String("server_address", cfg.ServerAddress),
+		zap.String("grpc_address", cfg.GRPCAddress),
 		zap.Duration("poll_interval", cfg.PollInterval),
 		zap.Duration("report_interval", cfg.ReportInterval),
 		zap.String("crypto_key", cfg.CryptoKey),
@@ -515,11 +541,16 @@ func main() {
 		zap.Int("rate_limit", cfg.RateLimit),
 	)
 
-	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress, cfg.CryptoKey, cfg.CryptoKeyPath, cfg.RateLimit)
+	agent := NewAgent(cfg.PollInterval, cfg.ReportInterval, cfg.ServerAddress, cfg.CryptoKey, cfg.CryptoKeyPath, cfg.GRPCAddress, cfg.RateLimit)
 
 	// Graceful shutdown: перехватываем сигналы SIGINT, SIGTERM, SIGQUIT
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
 	agent.Start(ctx)
+
+	// Закрываем gRPC соединение, если оно было создано
+	if agent.grpcSender != nil {
+		agent.grpcSender.Close()
+	}
 }

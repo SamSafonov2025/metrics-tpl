@@ -5,14 +5,19 @@ import (
 	"crypto/rsa"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os/signal"
 	"syscall"
 	"time"
 
+	"google.golang.org/grpc"
+
+	"github.com/SamSafonov2025/metrics-tpl/internal/grpcserver"
 	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
 	"github.com/SamSafonov2025/metrics-tpl/internal/rsacrypto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/service"
+	pb "github.com/SamSafonov2025/metrics-tpl/proto"
 
 	"go.uber.org/zap"
 
@@ -100,6 +105,31 @@ func main() {
 
 	server := &http.Server{Addr: cfg.ServerAddress, Handler: r}
 
+	// Создаем и запускаем gRPC сервер, если указан адрес
+	var grpcServer *grpc.Server
+	if cfg.GRPCAddress != "" {
+		// Создаем gRPC сервер с интерсептором для проверки trusted_subnet
+		grpcServer = grpc.NewServer(
+			grpc.UnaryInterceptor(grpcserver.TrustedSubnetInterceptor(cfg.TrustedSubnet)),
+		)
+
+		// Регистрируем MetricsServer
+		metricsGRPCServer := grpcserver.NewMetricsGRPCServer(svc)
+		pb.RegisterMetricsServer(grpcServer, metricsGRPCServer)
+
+		// Запускаем gRPC сервер в отдельной горутине
+		go func() {
+			lis, err := net.Listen("tcp", cfg.GRPCAddress)
+			if err != nil {
+				logger.GetLogger().Fatal("Failed to listen for gRPC", zap.Error(err))
+			}
+			logger.GetLogger().Info("gRPC server started", zap.String("address", cfg.GRPCAddress))
+			if err := grpcServer.Serve(lis); err != nil {
+				logger.GetLogger().Fatal("gRPC server failed", zap.Error(err))
+			}
+		}()
+	}
+
 	// Graceful shutdown: перехватываем сигналы SIGINT, SIGTERM, SIGQUIT
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
@@ -121,6 +151,13 @@ func main() {
 		logger.GetLogger().Error("Server shutdown error", zap.Error(err))
 	} else {
 		logger.GetLogger().Info("HTTP server stopped successfully")
+	}
+
+	// Останавливаем gRPC сервер, если он был запущен
+	if grpcServer != nil {
+		logger.GetLogger().Info("Stopping gRPC server...")
+		grpcServer.GracefulStop()
+		logger.GetLogger().Info("gRPC server stopped successfully")
 	}
 
 	// Сохраняем все несохранённые данные перед завершением

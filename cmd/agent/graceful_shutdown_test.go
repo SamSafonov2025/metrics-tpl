@@ -27,6 +27,7 @@ func TestAgentGracefulShutdown(t *testing.T) {
 		200*time.Millisecond, // report
 		server.Listener.Addr().String(),
 		"", "", // no crypto
+		"",     // no gRPC
 		2,      // 2 workers
 	)
 
