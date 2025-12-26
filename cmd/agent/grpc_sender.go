@@ -25,7 +25,7 @@ type MetricsGRPCSender struct {
 // NewMetricsGRPCSender создает новый gRPC отправитель метрик
 func NewMetricsGRPCSender(grpcAddress string) (*MetricsGRPCSender, error) {
 	// Устанавливаем соединение с gRPC сервером
-	conn, err := grpc.Dial(grpcAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	conn, err := grpc.NewClient(grpcAddress, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to gRPC server: %w", err)
 	}
