@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rsa"
 	"fmt"
 	"log"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/SamSafonov2025/metrics-tpl/internal/postgres"
+	"github.com/SamSafonov2025/metrics-tpl/internal/rsacrypto"
 	"github.com/SamSafonov2025/metrics-tpl/internal/service"
 
 	"go.uber.org/zap"
@@ -47,7 +49,21 @@ func main() {
 		zap.Bool("restore", cfg.Restore),
 		zap.String("database_dsn", cfg.Database),
 		zap.String("crypto_key", cfg.CryptoKey),
+		zap.String("crypto_key_path", cfg.CryptoKeyPath),
 	)
+
+	// Load RSA private key if path is provided
+	var privateKey *rsa.PrivateKey
+	if cfg.CryptoKeyPath != "" {
+		var err error
+		privateKey, err = rsacrypto.LoadPrivateKey(cfg.CryptoKeyPath)
+		if err != nil {
+			logger.GetLogger().Fatal("Failed to load private key",
+				zap.String("path", cfg.CryptoKeyPath),
+				zap.Error(err))
+		}
+		logger.GetLogger().Info("Loaded RSA private key", zap.String("path", cfg.CryptoKeyPath))
+	}
 
 	s := storage.NewStorage(cfg) // репозиторий (interfaces.Store)
 	svc := service.NewMetricsService(s, cfg.StoreInterval,
@@ -73,7 +89,7 @@ func main() {
 		logger.GetLogger().Info("URL audit observer registered", zap.String("url", cfg.AuditURL))
 	}
 
-	r := router.New(svc, cfg.CryptoKey, auditPublisher)
+	r := router.New(svc, cfg.CryptoKey, privateKey, auditPublisher)
 
 	logger.GetLogger().Info("Server started",
 		zap.String("address", cfg.ServerAddress),
@@ -83,7 +99,9 @@ func main() {
 	)
 
 	server := &http.Server{Addr: cfg.ServerAddress, Handler: r}
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+
+	// Graceful shutdown: перехватываем сигналы SIGINT, SIGTERM, SIGQUIT
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	defer stop()
 
 	go func() {
@@ -92,12 +110,21 @@ func main() {
 		}
 	}()
 
+	// Ожидаем сигнал завершения
 	<-ctx.Done()
+	logger.GetLogger().Info("Received shutdown signal, gracefully shutting down server...")
 
-	logger.GetLogger().Info("Shutting down server...")
+	// Останавливаем HTTP сервер с тайм-аутом
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		logger.GetLogger().Fatal("Server forced to shutdown", zap.Error(err))
+		logger.GetLogger().Error("Server shutdown error", zap.Error(err))
+	} else {
+		logger.GetLogger().Info("HTTP server stopped successfully")
 	}
+
+	// Сохраняем все несохранённые данные перед завершением
+	logger.GetLogger().Info("Saving unsaved data...")
+	storage.Close()
+	logger.GetLogger().Info("Server shutdown completed successfully")
 }
