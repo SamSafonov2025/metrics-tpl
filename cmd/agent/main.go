@@ -366,7 +366,7 @@ func (a *Agent) Start(ctx context.Context) {
 					}
 				case batch := <-a.jobs:
 					sendCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
-					_ = a.sender.SendBatchJSONCtx(sendCtx, batch)
+					a.sender.SendBatchJSONCtx(sendCtx, batch)
 					cancel()
 				}
 			}

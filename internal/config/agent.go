@@ -1,155 +1,86 @@
 package config
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
 	"os"
-	"strconv"
 	"time"
+
+	"github.com/ilyakaznacheev/cleanenv"
 )
 
 type AgentConfig struct {
-	ServerAddress  string
-	PollInterval   time.Duration
-	ReportInterval time.Duration
-	CryptoKey      string // HMAC signing key
-	CryptoKeyPath  string // Path to RSA public key file for encryption
-	RateLimit      int
+	ServerAddress  string        `env:"ADDRESS" env-default:"localhost:8080"`
+	PollInterval   time.Duration `env:"POLL_INTERVAL" env-default:"2s"`
+	ReportInterval time.Duration `env:"REPORT_INTERVAL" env-default:"10s"`
+	CryptoKey      string        `env:"KEY" env-default:""`
+	CryptoKeyPath  string        `env:"CRYPTO_KEY" env-default:""`
+	RateLimit      int           `env:"RATE_LIMIT" env-default:"4"`
 }
 
 func ParseAgentFlags() *AgentConfig {
 	cfg := &AgentConfig{}
-	var configFile string
 
-	// 0) Определяем путь к JSON конфигу (из флага или env)
+	// Сначала читаем переменные окружения и значения по умолчанию через cleanenv
+	_ = cleanenv.ReadEnv(cfg)
+
+	// Парсим флаг конфигурационного файла отдельно
+	var configFile string
 	flag.StringVar(&configFile, "c", "", "Path to JSON configuration file")
 	flag.StringVar(&configFile, "config", "", "Path to JSON configuration file")
 
-	// 1) Объявляем флаги
+	// Временные переменные для флагов (чтобы отличить явно заданные от дефолтных)
 	var (
-		flagAddress        string
-		flagPollInt        int
-		flagReportInt      int
-		flagKey            string
-		flagCryptoKey      string
-		flagRateLimit      int
+		addrFlag      string
+		pollFlag      time.Duration
+		reportFlag    time.Duration
+		keyFlag       string
+		cryptoKeyFlag string
+		rateLimitFlag int
 	)
 
-	flag.StringVar(&flagAddress, "a", "", "HTTP server endpoint address")
-	flag.IntVar(&flagPollInt, "p", -1, "Poll interval in seconds")
-	flag.IntVar(&flagReportInt, "r", -1, "Report interval in seconds")
-	flag.StringVar(&flagKey, "k", "", "Key for hash calculation")
-	flag.StringVar(&flagCryptoKey, "crypto-key", "", "Path to RSA public key file for encryption")
-	flag.IntVar(&flagRateLimit, "l", -1, "Max concurrent outbound requests (rate limit)")
-
+	// Парсим флаги во временные переменные
+	flag.StringVar(&addrFlag, "a", "", "HTTP server endpoint address")
+	flag.DurationVar(&pollFlag, "p", 0, "Poll interval")
+	flag.DurationVar(&reportFlag, "r", 0, "Report interval")
+	flag.StringVar(&keyFlag, "k", "", "Key for hash calculation")
+	flag.StringVar(&cryptoKeyFlag, "crypto-key", "", "Path to RSA public key for encryption")
+	flag.IntVar(&rateLimitFlag, "l", 0, "Max concurrent outbound requests (rate limit)")
 	flag.Parse()
 
-	// Проверяем переменную окружения для конфигурационного файла
-	if configFile == "" {
-		if v, ok := os.LookupEnv("CONFIG"); ok {
-			configFile = v
-		}
-	}
-
-	// 2) Загружаем JSON конфигурацию (если указана)
-	var jsonCfg *AgentJSONConfig
+	// Загружаем конфигурацию из JSON файла, если указан
 	if configFile != "" {
-		var err error
-		jsonCfg, err = LoadAgentJSONConfig(configFile)
-		if err != nil {
-			log.Printf("Warning: failed to load JSON config from %s: %v", configFile, err)
+		if err := loadAgentJSONConfig(configFile, cfg); err != nil {
+			// Логируем ошибку, но продолжаем с текущей конфигурацией
+			_ = err
 		}
 	}
 
-	// 3) Устанавливаем значения с приоритетом: флаги > env > JSON > defaults
-
-	// Address
-	cfg.ServerAddress = "localhost:8080" // default
-	if jsonCfg != nil && jsonCfg.Address != "" {
-		cfg.ServerAddress = jsonCfg.Address
-	}
-	if v, ok := os.LookupEnv("ADDRESS"); ok {
-		cfg.ServerAddress = v
-	}
-	if flagAddress != "" {
-		cfg.ServerAddress = flagAddress
-	}
-
-	// PollInterval
-	pollSeconds := 2 // default
-	if jsonCfg != nil && jsonCfg.PollInterval != "" {
-		if d, err := time.ParseDuration(jsonCfg.PollInterval); err == nil {
-			pollSeconds = int(d.Seconds())
+	// Применяем флаги поверх всего (наивысший приоритет), если они были явно указаны
+	flag.Visit(func(f *flag.Flag) {
+		switch f.Name {
+		case "a":
+			cfg.ServerAddress = addrFlag
+		case "p":
+			cfg.PollInterval = pollFlag
+		case "r":
+			cfg.ReportInterval = reportFlag
+		case "k":
+			cfg.CryptoKey = keyFlag
+		case "crypto-key":
+			cfg.CryptoKeyPath = cryptoKeyFlag
+		case "l":
+			cfg.RateLimit = rateLimitFlag
 		}
-	}
-	if v, ok := os.LookupEnv("POLL_INTERVAL"); ok {
-		if n, err := strconv.Atoi(v); err == nil {
-			pollSeconds = n
-		}
-	}
-	if flagPollInt >= 0 {
-		pollSeconds = flagPollInt
-	}
+	})
 
-	// ReportInterval
-	reportSeconds := 10 // default
-	if jsonCfg != nil && jsonCfg.ReportInterval != "" {
-		if d, err := time.ParseDuration(jsonCfg.ReportInterval); err == nil {
-			reportSeconds = int(d.Seconds())
-		}
-	}
-	if v, ok := os.LookupEnv("REPORT_INTERVAL"); ok {
-		if n, err := strconv.Atoi(v); err == nil {
-			reportSeconds = n
-		}
-	}
-	if flagReportInt >= 0 {
-		reportSeconds = flagReportInt
-	}
-
-	// CryptoKeyPath (для RSA)
-	cfg.CryptoKeyPath = "" // default
-	if jsonCfg != nil && jsonCfg.CryptoKey != "" {
-		cfg.CryptoKeyPath = jsonCfg.CryptoKey
-	}
-	if v, ok := os.LookupEnv("CRYPTO_KEY"); ok {
-		cfg.CryptoKeyPath = v
-	}
-	if flagCryptoKey != "" {
-		cfg.CryptoKeyPath = flagCryptoKey
-	}
-
-	// CryptoKey (для HMAC)
-	cfg.CryptoKey = "" // default
-	if v, ok := os.LookupEnv("KEY"); ok {
-		cfg.CryptoKey = v
-	}
-	if flagKey != "" {
-		cfg.CryptoKey = flagKey
-	}
-
-	// RateLimit
-	cfg.RateLimit = 4 // default
-	if v, ok := os.LookupEnv("RATE_LIMIT"); ok {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.RateLimit = n
-		}
-	}
-	if flagRateLimit >= 0 {
-		cfg.RateLimit = flagRateLimit
-	}
-
-	// Нормализация
+	// Валидация
 	if cfg.RateLimit < 1 {
 		cfg.RateLimit = 1
 	}
 
-	// 4) Производные поля
-	cfg.PollInterval = time.Duration(pollSeconds) * time.Second
-	cfg.ReportInterval = time.Duration(reportSeconds) * time.Second
-
-	// Debug-выводы (сохраняем для совместимости)
+	// debug-выводы (оставил как в исходнике)
 	fmt.Printf("AGENT: key (%s) !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", cfg.CryptoKey)
 	fmt.Printf("AGENT: cfg.CryptoKey (%s) !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", cfg.CryptoKey)
 	fmt.Printf("AGENT: rate_limit (%d)\n", cfg.RateLimit)
@@ -157,18 +88,43 @@ func ParseAgentFlags() *AgentConfig {
 	return cfg
 }
 
-func atoiEnv(k string, def int) int {
-	if v, ok := os.LookupEnv(k); ok {
-		if n, err := strconv.Atoi(v); err == nil {
-			return n
-		}
-	}
-	return def
+// JSONAgentConfig represents the structure of the JSON configuration file
+type JSONAgentConfig struct {
+	Address        string `json:"address"`
+	ReportInterval string `json:"report_interval"`
+	PollInterval   string `json:"poll_interval"`
+	CryptoKey      string `json:"crypto_key"`
 }
 
-func getEnv(k, def string) string {
-	if v, ok := os.LookupEnv(k); ok {
-		return v
+// loadAgentJSONConfig loads configuration from JSON file
+func loadAgentJSONConfig(filename string, cfg *AgentConfig) error {
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return err
 	}
-	return def
+
+	var jsonCfg JSONAgentConfig
+	if err := json.Unmarshal(data, &jsonCfg); err != nil {
+		return err
+	}
+
+	// Применяем значения из JSON, если они не пустые
+	if jsonCfg.Address != "" {
+		cfg.ServerAddress = jsonCfg.Address
+	}
+	if jsonCfg.CryptoKey != "" {
+		cfg.CryptoKeyPath = jsonCfg.CryptoKey
+	}
+	if jsonCfg.PollInterval != "" {
+		if interval, err := time.ParseDuration(jsonCfg.PollInterval); err == nil {
+			cfg.PollInterval = interval
+		}
+	}
+	if jsonCfg.ReportInterval != "" {
+		if interval, err := time.ParseDuration(jsonCfg.ReportInterval); err == nil {
+			cfg.ReportInterval = interval
+		}
+	}
+
+	return nil
 }
