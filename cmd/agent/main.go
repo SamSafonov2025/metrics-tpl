@@ -330,9 +330,10 @@ type Agent struct {
 	collector      *MetricsCollector
 	sender         *MetricsSender
 
-	rateLimit int
-	jobs      chan []Metrics
-	wg        sync.WaitGroup // для отслеживания активных воркеров
+	rateLimit    int
+	jobs         chan []Metrics
+	wg           sync.WaitGroup // для отслеживания активных воркеров
+	producersWg  sync.WaitGroup // для отслеживания горутин-producers
 }
 
 func NewAgent(pollInterval, reportInterval time.Duration, serverAddress, cryptoKey, publicKeyPath string, rateLimit int) *Agent {
@@ -396,7 +397,9 @@ func (a *Agent) Start(ctx context.Context) {
 	}
 
 	// (1) инкрементируем pollCount по pollInterval
+	a.producersWg.Add(1)
 	go func() {
+		defer a.producersWg.Done()
 		for {
 			select {
 			case <-ctx.Done():
@@ -408,7 +411,9 @@ func (a *Agent) Start(ctx context.Context) {
 	}()
 
 	// (2) каждые reportInterval — формируем батч из runtime + PollCount и кладём в очередь
+	a.producersWg.Add(1)
 	go func() {
+		defer a.producersWg.Done()
 		for {
 			select {
 			case <-ctx.Done():
@@ -432,7 +437,9 @@ func (a *Agent) Start(ctx context.Context) {
 	}()
 
 	// (3) системные метрики с тем же pollInterval (можно сделать отдельный интервал, если нужно)
+	a.producersWg.Add(1)
 	go func() {
+		defer a.producersWg.Done()
 		sysTicker := time.NewTicker(a.pollInterval)
 		defer sysTicker.Stop()
 		for {
@@ -452,6 +459,9 @@ func (a *Agent) Start(ctx context.Context) {
 	// ожидание сигнала завершения
 	<-ctx.Done()
 	fmt.Println("agent: received shutdown signal, finishing current work...")
+
+	// Ждем завершения всех producer горутин перед закрытием канала
+	a.producersWg.Wait()
 
 	// Закрываем канал jobs, чтобы воркеры завершили обработку оставшихся задач
 	close(a.jobs)
