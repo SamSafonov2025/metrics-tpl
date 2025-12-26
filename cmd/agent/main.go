@@ -180,6 +180,27 @@ func isRetryableHTTPOrNetErr(err error) bool {
 	return false
 }
 
+// getLocalIPForServer возвращает локальный IP-адрес, который будет использоваться
+// для подключения к указанному серверу
+func getLocalIPForServer(serverAddr string) string {
+	// Извлекаем хост из адреса сервера
+	host := serverAddr
+	if idx := strings.Index(serverAddr, ":"); idx >= 0 {
+		host = serverAddr[:idx]
+	}
+
+	// Пытаемся установить UDP-соединение с сервером
+	// (на самом деле пакеты не отправляются, просто выбирается интерфейс)
+	conn, err := net.Dial("udp", net.JoinHostPort(host, "80"))
+	if err != nil {
+		return "127.0.0.1"
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
+}
+
 func retryCtx(ctx context.Context, fn func() error, isRetryable func(error) bool) error {
 	attempts := len(backoffs) + 1
 	for i := 0; i < attempts; i++ {
@@ -247,6 +268,7 @@ func (s *MetricsSender) postGzJSONCtx(ctx context.Context, path string, payload 
 	hash := crypto.GenerateHash(jsonData, s.cryptoKey)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
+	req.Header.Set("X-Real-IP", getLocalIPForServer(s.serverAddress)) // IP-адрес агента для проверки доверенной подсети
 	if s.publicKey != nil {
 		req.Header.Set("X-Encrypted", "true") // Indicate that the body is encrypted
 	}

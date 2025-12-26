@@ -89,7 +89,7 @@ func main() {
 		logger.GetLogger().Info("URL audit observer registered", zap.String("url", cfg.AuditURL))
 	}
 
-	r := router.New(svc, cfg.CryptoKey, privateKey, auditPublisher)
+	r := router.New(svc, cfg.CryptoKey, privateKey, auditPublisher, cfg.TrustedSubnet)
 
 	logger.GetLogger().Info("Server started",
 		zap.String("address", cfg.ServerAddress),

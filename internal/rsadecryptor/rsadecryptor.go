@@ -5,10 +5,11 @@ import (
 	"bytes"
 	"crypto/rsa"
 	"io"
-	"log"
 	"net/http"
 
+	"github.com/SamSafonov2025/metrics-tpl/internal/logger"
 	"github.com/SamSafonov2025/metrics-tpl/internal/rsacrypto"
+	"go.uber.org/zap"
 )
 
 // RSADecryptMiddleware creates a middleware that decrypts RSA-encrypted request bodies.
@@ -26,7 +27,7 @@ func RSADecryptMiddleware(privateKey *rsa.PrivateKey) func(http.Handler) http.Ha
 
 			// If no private key is provided, return error
 			if privateKey == nil {
-				log.Println("rsadecryptor: received encrypted request but no private key is configured")
+				logger.GetLogger().Error("rsadecryptor: received encrypted request but no private key is configured")
 				http.Error(w, "Server not configured to decrypt encrypted requests", http.StatusBadRequest)
 				return
 			}
@@ -34,7 +35,7 @@ func RSADecryptMiddleware(privateKey *rsa.PrivateKey) func(http.Handler) http.Ha
 			// Read the encrypted body
 			encryptedBody, err := io.ReadAll(r.Body)
 			if err != nil {
-				log.Printf("rsadecryptor: failed to read encrypted body: %v", err)
+				logger.GetLogger().Error("rsadecryptor: failed to read encrypted body", zap.Error(err))
 				http.Error(w, "Failed to read encrypted body", http.StatusBadRequest)
 				return
 			}
@@ -43,12 +44,14 @@ func RSADecryptMiddleware(privateKey *rsa.PrivateKey) func(http.Handler) http.Ha
 			// Decrypt the body
 			decryptedBody, err := rsacrypto.DecryptChunked(encryptedBody, privateKey)
 			if err != nil {
-				log.Printf("rsadecryptor: failed to decrypt body: %v", err)
+				logger.GetLogger().Error("rsadecryptor: failed to decrypt body", zap.Error(err))
 				http.Error(w, "Failed to decrypt body", http.StatusBadRequest)
 				return
 			}
 
-			log.Printf("rsadecryptor: decrypted request body: encrypted=%dB -> decrypted=%dB", len(encryptedBody), len(decryptedBody))
+			logger.GetLogger().Info("rsadecryptor: decrypted request body",
+				zap.Int("encrypted_bytes", len(encryptedBody)),
+				zap.Int("decrypted_bytes", len(decryptedBody)))
 
 			// Replace the request body with decrypted data
 			r.Body = io.NopCloser(bytes.NewReader(decryptedBody))

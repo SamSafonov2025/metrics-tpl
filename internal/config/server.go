@@ -19,6 +19,7 @@ type ServerConfig struct {
 	CryptoKeyPath   string        `env:"CRYPTO_KEY" env-default:""`
 	AuditFile       string        `env:"AUDIT_FILE" env-default:""`
 	AuditURL        string        `env:"AUDIT_URL" env-default:""`
+	TrustedSubnet   string        `env:"TRUSTED_SUBNET" env-default:""`
 }
 
 func ParseServerFlags() *ServerConfig {
@@ -34,15 +35,16 @@ func ParseServerFlags() *ServerConfig {
 
 	// Временные переменные для флагов (чтобы отличить явно заданные от дефолтных)
 	var (
-		addrFlag      string
-		intervalFlag  time.Duration
-		fileFlag      string
-		restoreFlag   bool
-		dbFlag        string
-		keyFlag       string
-		cryptoKeyFlag string
-		auditFileFlag string
-		auditURLFlag  string
+		addrFlag          string
+		intervalFlag      time.Duration
+		fileFlag          string
+		restoreFlag       bool
+		dbFlag            string
+		keyFlag           string
+		cryptoKeyFlag     string
+		auditFileFlag     string
+		auditURLFlag      string
+		trustedSubnetFlag string
 	)
 
 	// Парсим флаги во временные переменные
@@ -55,6 +57,7 @@ func ParseServerFlags() *ServerConfig {
 	flag.StringVar(&cryptoKeyFlag, "crypto-key", "", "Path to RSA private key for decryption")
 	flag.StringVar(&auditFileFlag, "audit-file", "", "Audit log file path")
 	flag.StringVar(&auditURLFlag, "audit-url", "", "Audit log URL endpoint")
+	flag.StringVar(&trustedSubnetFlag, "t", "", "Trusted subnet in CIDR notation")
 	flag.Parse()
 
 	// Загружаем конфигурацию из JSON файла, если указан
@@ -86,6 +89,8 @@ func ParseServerFlags() *ServerConfig {
 			cfg.AuditFile = auditFileFlag
 		case "audit-url":
 			cfg.AuditURL = auditURLFlag
+		case "t":
+			cfg.TrustedSubnet = trustedSubnetFlag
 		}
 	})
 
@@ -100,6 +105,7 @@ type JSONServerConfig struct {
 	StoreFile     string `json:"store_file"`
 	DatabaseDSN   string `json:"database_dsn"`
 	CryptoKey     string `json:"crypto_key"`
+	TrustedSubnet string `json:"trusted_subnet"`
 }
 
 // loadJSONConfig loads configuration from JSON file
@@ -126,6 +132,9 @@ func loadJSONConfig(filename string, cfg *ServerConfig) error {
 	}
 	if jsonCfg.CryptoKey != "" {
 		cfg.CryptoKeyPath = jsonCfg.CryptoKey
+	}
+	if jsonCfg.TrustedSubnet != "" {
+		cfg.TrustedSubnet = jsonCfg.TrustedSubnet
 	}
 	if jsonCfg.StoreInterval != "" {
 		if interval, err := time.ParseDuration(jsonCfg.StoreInterval); err == nil {
