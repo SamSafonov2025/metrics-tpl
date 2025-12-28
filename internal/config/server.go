@@ -11,6 +11,7 @@ import (
 
 type ServerConfig struct {
 	ServerAddress   string        `env:"ADDRESS" env-default:"localhost:8080"`
+	GRPCAddress     string        `env:"GRPC_ADDRESS" env-default:""`
 	StoreInterval   time.Duration `env:"STORE_INTERVAL" env-default:"300s"`
 	FileStoragePath string        `env:"FILE_STORAGE_PATH" env-default:"/tmp/metrics-db.json"`
 	Restore         bool          `env:"RESTORE" env-default:"false"`
@@ -19,6 +20,7 @@ type ServerConfig struct {
 	CryptoKeyPath   string        `env:"CRYPTO_KEY" env-default:""`
 	AuditFile       string        `env:"AUDIT_FILE" env-default:""`
 	AuditURL        string        `env:"AUDIT_URL" env-default:""`
+	TrustedSubnet   string        `env:"TRUSTED_SUBNET" env-default:""`
 }
 
 func ParseServerFlags() *ServerConfig {
@@ -34,19 +36,22 @@ func ParseServerFlags() *ServerConfig {
 
 	// Временные переменные для флагов (чтобы отличить явно заданные от дефолтных)
 	var (
-		addrFlag      string
-		intervalFlag  time.Duration
-		fileFlag      string
-		restoreFlag   bool
-		dbFlag        string
-		keyFlag       string
-		cryptoKeyFlag string
-		auditFileFlag string
-		auditURLFlag  string
+		addrFlag          string
+		grpcAddrFlag      string
+		intervalFlag      time.Duration
+		fileFlag          string
+		restoreFlag       bool
+		dbFlag            string
+		keyFlag           string
+		cryptoKeyFlag     string
+		auditFileFlag     string
+		auditURLFlag      string
+		trustedSubnetFlag string
 	)
 
 	// Парсим флаги во временные переменные
 	flag.StringVar(&addrFlag, "a", "", "HTTP server endpoint address")
+	flag.StringVar(&grpcAddrFlag, "g", "", "gRPC server endpoint address")
 	flag.DurationVar(&intervalFlag, "i", 0, "Store interval (0 = sync mode)")
 	flag.StringVar(&fileFlag, "f", "", "File storage path")
 	flag.BoolVar(&restoreFlag, "r", false, "Restore metrics from file")
@@ -55,6 +60,7 @@ func ParseServerFlags() *ServerConfig {
 	flag.StringVar(&cryptoKeyFlag, "crypto-key", "", "Path to RSA private key for decryption")
 	flag.StringVar(&auditFileFlag, "audit-file", "", "Audit log file path")
 	flag.StringVar(&auditURLFlag, "audit-url", "", "Audit log URL endpoint")
+	flag.StringVar(&trustedSubnetFlag, "t", "", "Trusted subnet in CIDR notation")
 	flag.Parse()
 
 	// Загружаем конфигурацию из JSON файла, если указан
@@ -70,6 +76,8 @@ func ParseServerFlags() *ServerConfig {
 		switch f.Name {
 		case "a":
 			cfg.ServerAddress = addrFlag
+		case "g":
+			cfg.GRPCAddress = grpcAddrFlag
 		case "i":
 			cfg.StoreInterval = intervalFlag
 		case "f":
@@ -86,6 +94,8 @@ func ParseServerFlags() *ServerConfig {
 			cfg.AuditFile = auditFileFlag
 		case "audit-url":
 			cfg.AuditURL = auditURLFlag
+		case "t":
+			cfg.TrustedSubnet = trustedSubnetFlag
 		}
 	})
 
@@ -95,11 +105,13 @@ func ParseServerFlags() *ServerConfig {
 // JSONServerConfig represents the structure of the JSON configuration file
 type JSONServerConfig struct {
 	Address       string `json:"address"`
+	GRPCAddress   string `json:"grpc_address"`
 	Restore       bool   `json:"restore"`
 	StoreInterval string `json:"store_interval"`
 	StoreFile     string `json:"store_file"`
 	DatabaseDSN   string `json:"database_dsn"`
 	CryptoKey     string `json:"crypto_key"`
+	TrustedSubnet string `json:"trusted_subnet"`
 }
 
 // loadJSONConfig loads configuration from JSON file
@@ -118,6 +130,9 @@ func loadJSONConfig(filename string, cfg *ServerConfig) error {
 	if jsonCfg.Address != "" {
 		cfg.ServerAddress = jsonCfg.Address
 	}
+	if jsonCfg.GRPCAddress != "" {
+		cfg.GRPCAddress = jsonCfg.GRPCAddress
+	}
 	if jsonCfg.StoreFile != "" {
 		cfg.FileStoragePath = jsonCfg.StoreFile
 	}
@@ -126,6 +141,9 @@ func loadJSONConfig(filename string, cfg *ServerConfig) error {
 	}
 	if jsonCfg.CryptoKey != "" {
 		cfg.CryptoKeyPath = jsonCfg.CryptoKey
+	}
+	if jsonCfg.TrustedSubnet != "" {
+		cfg.TrustedSubnet = jsonCfg.TrustedSubnet
 	}
 	if jsonCfg.StoreInterval != "" {
 		if interval, err := time.ParseDuration(jsonCfg.StoreInterval); err == nil {

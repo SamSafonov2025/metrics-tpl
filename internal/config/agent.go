@@ -12,6 +12,7 @@ import (
 
 type AgentConfig struct {
 	ServerAddress  string        `env:"ADDRESS" env-default:"localhost:8080"`
+	GRPCAddress    string        `env:"GRPC_ADDRESS" env-default:""`
 	PollInterval   time.Duration `env:"POLL_INTERVAL" env-default:"2s"`
 	ReportInterval time.Duration `env:"REPORT_INTERVAL" env-default:"10s"`
 	CryptoKey      string        `env:"KEY" env-default:""`
@@ -32,16 +33,18 @@ func ParseAgentFlags() *AgentConfig {
 
 	// Временные переменные для флагов (чтобы отличить явно заданные от дефолтных)
 	var (
-		addrFlag      string
-		pollFlag      time.Duration
-		reportFlag    time.Duration
-		keyFlag       string
-		cryptoKeyFlag string
-		rateLimitFlag int
+		addrFlag       string
+		grpcAddrFlag   string
+		pollFlag       time.Duration
+		reportFlag     time.Duration
+		keyFlag        string
+		cryptoKeyFlag  string
+		rateLimitFlag  int
 	)
 
 	// Парсим флаги во временные переменные
 	flag.StringVar(&addrFlag, "a", "", "HTTP server endpoint address")
+	flag.StringVar(&grpcAddrFlag, "g", "", "gRPC server endpoint address")
 	flag.DurationVar(&pollFlag, "p", 0, "Poll interval")
 	flag.DurationVar(&reportFlag, "r", 0, "Report interval")
 	flag.StringVar(&keyFlag, "k", "", "Key for hash calculation")
@@ -62,6 +65,8 @@ func ParseAgentFlags() *AgentConfig {
 		switch f.Name {
 		case "a":
 			cfg.ServerAddress = addrFlag
+		case "g":
+			cfg.GRPCAddress = grpcAddrFlag
 		case "p":
 			cfg.PollInterval = pollFlag
 		case "r":
@@ -91,6 +96,7 @@ func ParseAgentFlags() *AgentConfig {
 // JSONAgentConfig represents the structure of the JSON configuration file
 type JSONAgentConfig struct {
 	Address        string `json:"address"`
+	GRPCAddress    string `json:"grpc_address"`
 	ReportInterval string `json:"report_interval"`
 	PollInterval   string `json:"poll_interval"`
 	CryptoKey      string `json:"crypto_key"`
@@ -111,6 +117,9 @@ func loadAgentJSONConfig(filename string, cfg *AgentConfig) error {
 	// Применяем значения из JSON, если они не пустые
 	if jsonCfg.Address != "" {
 		cfg.ServerAddress = jsonCfg.Address
+	}
+	if jsonCfg.GRPCAddress != "" {
+		cfg.GRPCAddress = jsonCfg.GRPCAddress
 	}
 	if jsonCfg.CryptoKey != "" {
 		cfg.CryptoKeyPath = jsonCfg.CryptoKey
