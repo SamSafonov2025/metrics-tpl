@@ -37,15 +37,22 @@ func New(svc service.MetricsService, key string, privateKey *rsa.PrivateKey, aud
 	// Создаем middleware для проверки доверенной подсети
 	subnetMiddleware := middleware.TrustedSubnetMiddleware(trustedSubnet)
 
-	// Можно убрать HandlerLog(...) здесь, чтобы не было дублей.
-	// Я оставлю чистые хендлеры; если хотите оставить старые — просто верните logger.HandlerLog(...)
-	r.With(subnetMiddleware, c.HashValidationMiddleware).Post("/update", h.UpdateHandlerJSON)
-	r.With(subnetMiddleware, c.HashValidationMiddleware).Post("/update/", h.UpdateHandlerJSON)
-	r.With(subnetMiddleware, c.HashValidationMiddleware).Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
-	r.With(subnetMiddleware, c.HashValidationMiddleware).Post("/updates", h.UpdateMetrics)
-	r.With(subnetMiddleware, c.HashValidationMiddleware).Post("/updates/", h.UpdateMetrics)
-	r.With(c.HashValidationMiddleware).Post("/value", h.ValueHandlerJSON)
-	r.With(c.HashValidationMiddleware).Post("/value/", h.ValueHandlerJSON)
+	// Группа эндпоинтов с subnet и hash validation
+	r.Group(func(r chi.Router) {
+		r.Use(subnetMiddleware, c.HashValidationMiddleware)
+		r.Post("/update", h.UpdateHandlerJSON)
+		r.Post("/update/", h.UpdateHandlerJSON)
+		r.Post("/update/{metricType}/{metricName}/{metricValue}", h.UpdateHandler)
+		r.Post("/updates", h.UpdateMetrics)
+		r.Post("/updates/", h.UpdateMetrics)
+	})
+
+	// Группа эндпоинтов только с hash validation
+	r.Group(func(r chi.Router) {
+		r.Use(c.HashValidationMiddleware)
+		r.Post("/value", h.ValueHandlerJSON)
+		r.Post("/value/", h.ValueHandlerJSON)
+	})
 
 	r.Get("/", h.HomeHandler)
 	r.Get("/value/{metricType}/{metricName}", h.GetHandler)

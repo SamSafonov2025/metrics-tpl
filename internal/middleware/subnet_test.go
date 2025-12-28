@@ -14,7 +14,7 @@ func testMiddleware(t *testing.T, subnet, ip string, wantCode int) {
 	})
 
 	middleware := TrustedSubnetMiddleware(subnet)
-	req := httptest.NewRequest("POST", "/update", nil)
+	req := httptest.NewRequest(http.MethodPost, "/update", nil)
 	if ip != "" {
 		req.Header.Set("X-Real-IP", ip)
 	}
@@ -54,7 +54,7 @@ func TestTrustedSubnetMiddleware_RemoteAddrFallback(t *testing.T) {
 	})
 
 	middleware := TrustedSubnetMiddleware("192.168.1.0/24")
-	req := httptest.NewRequest("POST", "/update", nil)
+	req := httptest.NewRequest(http.MethodPost, "/update", nil)
 	req.RemoteAddr = "192.168.1.100:12345"
 	rec := httptest.NewRecorder()
 

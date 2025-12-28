@@ -398,9 +398,9 @@ func (a *Agent) Start(ctx context.Context) {
 							// Отправляем с новым контекстом (старый отменен)
 							sendCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 							if a.useGRPC && a.grpcSender != nil {
-								_ = a.grpcSender.SendBatchGRPCCtx(sendCtx, batch)
+								a.grpcSender.SendBatchGRPCCtx(sendCtx, batch)
 							} else {
-								_ = a.sender.SendBatchJSONCtx(sendCtx, batch)
+								a.sender.SendBatchJSONCtx(sendCtx, batch)
 							}
 							cancel()
 						default:

@@ -47,7 +47,7 @@ func TestTrustedSubnet_AllowedIP(t *testing.T) {
 	r := setupRouter("192.168.1.0/24")
 	_, body := createTestMetric()
 
-	req := httptest.NewRequest("POST", "/update", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Real-IP", "192.168.1.100")
 	rec := httptest.NewRecorder()
@@ -63,7 +63,7 @@ func TestTrustedSubnet_BlockedIP(t *testing.T) {
 	r := setupRouter("192.168.1.0/24")
 	_, body := createTestMetric()
 
-	req := httptest.NewRequest("POST", "/update", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Real-IP", "10.0.0.1")
 	rec := httptest.NewRecorder()
@@ -79,7 +79,7 @@ func TestTrustedSubnet_EmptySubnet(t *testing.T) {
 	r := setupRouter("")
 	_, body := createTestMetric()
 
-	req := httptest.NewRequest("POST", "/update", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Real-IP", "203.0.113.1")
 	rec := httptest.NewRecorder()
@@ -95,7 +95,7 @@ func TestTrustedSubnet_Localhost(t *testing.T) {
 	r := setupRouter("127.0.0.0/8")
 	_, body := createTestMetric()
 
-	req := httptest.NewRequest("POST", "/update", bytes.NewReader(body))
+	req := httptest.NewRequest(http.MethodPost, "/update", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Real-IP", "127.0.0.1")
 	rec := httptest.NewRecorder()
@@ -127,7 +127,7 @@ func TestTrustedSubnet_BatchUpdate(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		req := httptest.NewRequest("POST", "/updates", bytes.NewReader(body))
+		req := httptest.NewRequest(http.MethodPost, "/updates", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-Real-IP", tt.ip)
 		rec := httptest.NewRecorder()
